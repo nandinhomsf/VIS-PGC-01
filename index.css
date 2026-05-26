@@ -1,0 +1,10 @@
+body { margin: 0; font-family: Inter, system-ui, sans-serif; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color:#1f2937; }
+.app-shell { max-width: 1220px; margin: 0 auto; padding: 24px; }
+.topbar { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+.topbar h1 { font-size: 1.45rem; margin:0; color:#0f172a; }
+#viewSelect { padding:10px 12px; font-size:1rem; border-radius: 8px; border:1px solid #cbd5e1; background:#fff; }
+.panel { margin-top:14px; background:#fff; border:1px solid #dbeafe; border-radius:14px; padding:18px; box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06); }
+#question { font-weight:700; margin: 4px 0; }
+#explanation { color:#475569; margin: 6px 0 14px; }
+#status { margin-top: 12px; color:#6b7280; font-size:0.9rem; }
+svg { max-width:100%; height:auto; overflow: visible; }
