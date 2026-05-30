@@ -21,7 +21,7 @@ const HOLIDAY_MAP = [
 export function renderHolidayHeatmap(data) {
   const { svg } = createBaseChart();
 
-  // Margens generosas à esquerda (200px) para acomodar os rótulos longos do eixo Y
+  // Margens à esquerda para acomodar os rótulos longos do eixo Y
   // sem sobreposição com o grid. O heatmap ignora as margens padrão de createBaseChart.
   const margin = { top: 80, right: 60, bottom: 96, left: 200 };
   const width = 1120 - margin.left - margin.right;
@@ -31,51 +31,119 @@ export function renderHolidayHeatmap(data) {
     .append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-  // Domínio Y: ordem cronológica dos feriados | Domínio X: anos da análise
+  // Domínio Y: ordem cronológica dos feriados | Domínio X: anos da análise.
   const yDomain = HOLIDAY_MAP.map((d) => d.id);
   const xDomain = [2019, 2020, 2021, 2022];
 
-  // scaleBand garante células de largura uniforme com espaçamento (padding) entre elas
+  // scaleBand garante células de largura uniforme com espaçamento entre elas.
   const x = d3.scaleBand().domain(xDomain).range([0, width]).padding(0.04);
   const y = d3.scaleBand().domain(yDomain).range([0, height]).padding(0.04);
 
-  // Valor máximo real do dataset; serve como teto da escala de cor
-  const maxTrips = d3.max(data.holidaySeries, (d) => d.trips) || 10000;
+  /**
+   * Valores numéricos válidos usados pela escala de cor.
+   * Células sem dados ficam fora da escala e recebem uma cor neutra própria.
+   */
+  const tripsValues = data.holidaySeries
+    .map((d) => d.trips)
+    .filter((v) => Number.isFinite(v));
+
+  // Valores de referência usados nos rótulos da legenda e como fallback.
+  const maxTrips = d3.max(tripsValues) || 10000;
+  const minTrips = d3.min(tripsValues) || 0;
 
   /**
-   * Escala de cor sequencial multisegmento: do quase-preto (zero corridas)
-   * passando por índigo, magenta e terminando em dourado (volume máximo).
-   * Os breakpoints intermediários (~25% e ~65%) evitam que a maioria das
-   * células fique na mesma faixa de cor, maximizando a discriminação visual.
+   * Paleta Greens em 6 faixas discretas.
+   *
+   * O verde foi escolhido por funcionar bem para uma medida única e ordenada
+   * de volume: tons claros indicam menor intensidade e tons escuros indicam
+   * maior intensidade. A escala evita amarelo, vermelho e roxo, mantendo uma
+   * leitura mais limpa em fundo branco.
+   *
+   * A escala é amostrada entre 0.14 e 0.88 para evitar os extremos:
+   * - valores muito próximos de 0 ficam claros demais;
+   * - valores muito próximos de 1 ficam escuros demais.
+   *
+   * A escala por quantis distribui as cores conforme os valores reais do dataset,
+   * o que ajuda quando há concentração de observações em uma mesma faixa.
    */
-  const colorScale = d3
-    .scaleLinear()
-    .domain([0, maxTrips * 0.25, maxTrips * 0.65, maxTrips])
-    .range(["#1e293b", "#4f46e5", "#db2777", "#f59e0b"]);
+  const heatmapColors = d3.range(6).map((i) =>
+    d3.interpolateGreens(0.14 + i * ((0.88 - 0.14) / 5)),
+  );
 
-  // Linha de base pré-pandemia: média das corridas nos feriados até fev/2020
+  const colorScale = d3
+    .scaleQuantile()
+    .domain(tripsValues.length ? tripsValues : [0, maxTrips])
+    .range(heatmapColors);
+
+  /**
+   * Cores de superfície do gráfico.
+   * A mesma cor é usada no fundo visual do heatmap e na caixa explicativa,
+   * mantendo a composição mais uniforme.
+   */
+  const heatmapSurfaceColor = "#f8fafc";
+  const heatmapSurfaceBorder = "rgba(15, 23, 42, 0.08)";
+
+  // Cor neutra para células sem informação, sem sugerir baixo volume.
+  const missingCellColor = "#f1f5f9";
+
+  /**
+   * Cores semânticas das marcações especiais.
+   * A pandemia usa âmbar/marrom 
+   */
+  const impactColor = "#92400e";
+  const impactColorDark = "#78350f";
+  const impactShadow = "rgba(146, 64, 14, 0.42)";
+
+  const recoveryColor = "#92400e";
+  const recoveryColorDark = "#78350f";
+  const recoveryShadow = "rgba(146, 64, 14, 0.42)";
+
+  /**
+   * Define automaticamente se o texto dentro da célula deve ser claro ou escuro.
+   * Isso mantém a legibilidade nas diferentes intensidades da paleta verde.
+   */
+  function readableTextColor(backgroundColor) {
+    const color = d3.color(backgroundColor);
+    if (!color) return "#0f172a";
+
+    const rgb = [color.r, color.g, color.b].map((v) => {
+      const x = v / 255;
+      return x <= 0.03928
+        ? x / 12.92
+        : Math.pow((x + 0.055) / 1.055, 2.4);
+    });
+
+    const luminance =
+      0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+
+    return luminance > 0.45 ? "#0f172a" : "#ffffff";
+  }
+
+  // Linha de base pré-pandemia: média das corridas nos feriados até fev/2020. 
+  // A OMS decretou feriado em março/2020.
   const sortedSeries = [...data.holidaySeries].sort((a, b) =>
     a.dayISO.localeCompare(b.dayISO),
   );
+
   const baseline =
     d3.mean(
       sortedSeries.filter((d) => d.dayISO <= "2020-02-17"),
       (d) => d.trips,
     ) || 10000;
 
-  // Impacto: primeiro feriado com volume abaixo de 60% da baseline
+  // Impacto: primeiro feriado com volume abaixo de 60% da baseline.
   const impactPoint = sortedSeries.find((d) => d.trips < baseline * 0.6);
 
   /**
-   * Limiar de 75% (e não 90%) porque a baseline inclui jan/fev 2020,
-   * que registraram volumes excepcionalmente altos. Com 90%, nenhum feriado
-   * de 2021-2022 atingiria o critério; 75% identifica a retomada real.
+   * Limiar de 75% porque a baseline inclui jan/fev 2020,
+   * que registraram volumes excepcionalmente altos.
    * Fallback: caso o limiar nunca seja atingido, usa o feriado de maior
    * volume após o ponto de impacto.
    */
   const afterImpact = sortedSeries.filter(
     (d) => d.dayISO > (impactPoint?.dayISO ?? "2020-03-01"),
   );
+
   const recoveryPoint =
     afterImpact.find((d) => d.trips >= baseline * 0.75) ??
     afterImpact.reduce(
@@ -83,27 +151,30 @@ export function renderHolidayHeatmap(data) {
       null,
     );
 
-  // Chave composta (feriado_ano) usada para marcar células específicas do grid
+  // Chave composta (feriado_ano) usada para marcar células específicas do grid.
   const impactKey = impactPoint
     ? `${impactPoint.holidayName}_${impactPoint.year}`
     : null;
+
   const recoveryKey = recoveryPoint
     ? `${recoveryPoint.holidayName}_${recoveryPoint.year}`
     : null;
 
-  // Índice O(1) para buscar os dados de cada célula sem iterar o array inteiro
+  // Índice O(1) para buscar os dados de cada célula sem iterar o array inteiro.
   const dataMap = new Map();
   data.holidaySeries.forEach((item) => {
     dataMap.set(`${item.holidayName}_${item.year}`, item);
   });
 
-  // Monta a matriz completa do grid, incluindo células sem dados (trips: null)
-  // para que o layout seja sempre 9 linhas × 4 colunas
+  // Monta a matriz completa do grid, incluindo células sem dados.
+  // Isso mantém o layout sempre como 9 linhas × 4 colunas.
   const gridCells = [];
+
   yDomain.forEach((holiday) => {
     xDomain.forEach((year) => {
       const match = dataMap.get(`${holiday}_${year}`);
       const key = `${holiday}_${year}`;
+
       gridCells.push({
         holiday,
         year,
@@ -117,7 +188,7 @@ export function renderHolidayHeatmap(data) {
   });
 
   // O padrão join(div) garante que apenas um tooltip exista no DOM,
-  // evitando duplicação a cada re-renderização do heatmap
+  // evitando duplicação a cada re-renderização do heatmap.
   const tooltip = d3
     .select("body")
     .selectAll(".chart-tooltip")
@@ -125,7 +196,7 @@ export function renderHolidayHeatmap(data) {
     .join("div")
     .attr("class", "chart-tooltip");
 
-  // Renderiza as células do grid com preenchimento de cor proporcional ao volume
+  // Renderiza as células do grid com preenchimento de cor proporcional ao volume.
   const cells = g
     .selectAll("rect.cell")
     .data(gridCells)
@@ -138,15 +209,23 @@ export function renderHolidayHeatmap(data) {
     .attr("width", x.bandwidth())
     .attr("height", y.bandwidth())
     .attr("rx", 6)
-    .attr("fill", (d) => (d.trips === null ? "#0f172a" : colorScale(d.trips)))
-    .attr("stroke", (d) =>
-      d.trips === null ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.05)",
+    .attr("fill", (d) =>
+      d.trips === null ? missingCellColor : colorScale(d.trips),
     )
+    .attr("stroke", (d) => (d.trips === null ? "#cbd5e1" : "#ecfdf5"))
     .attr("stroke-width", 1.5);
 
-  // Borda neon brilhante (glow) sobreposta nas células marcadas como impacto ou retomada.
-  // Desenhada como rect separado para não interferir nos eventos de mouse da célula base.
+  /**
+   * Borda sobreposta nas células marcadas como impacto ou retomada.
+   *
+   * O impacto usa âmbar/marrom para se diferenciar do volume de corridas.
+   * A retomada usa azul para não se confundir com a escala principal verde.
+   *
+   * As etiquetas textuais ("PANDEMIA" / "RECUPERADO") evitam que a interpretação
+   * dependa apenas da cor.
+   */
   const markedCells = gridCells.filter((d) => d.isImpact || d.isRecovery);
+
   g.selectAll("rect.cell-border")
     .data(markedCells)
     .join("rect")
@@ -157,36 +236,43 @@ export function renderHolidayHeatmap(data) {
     .attr("height", y.bandwidth())
     .attr("rx", 6)
     .attr("fill", "none")
-    .attr("stroke", (d) => (d.isRecovery ? "#10b981" : "#ec4899"))
+    .attr("stroke", (d) => (d.isRecovery ? recoveryColor : impactColor))
     .attr("stroke-width", 3)
     .style(
       "filter",
-      (d) => `drop-shadow(0 0 6px ${d.isRecovery ? "#10b981" : "#ec4899"})`,
+      (d) =>
+        `drop-shadow(0 0 5px ${
+          d.isRecovery ? recoveryShadow : impactShadow
+        })`,
     )
     .style("pointer-events", "none");
 
-  // Add Interactive Tooltips on hover
+  // Tooltips interativos no hover.
   cells
     .on("mouseover", function (event, d) {
       if (d.trips === null) return;
 
-      d3.select(this).attr("stroke", "#ffffff").attr("stroke-width", 2);
+      d3.select(this).attr("stroke", "#14532d").attr("stroke-width", 2.25);
 
       tooltip.style("opacity", 1).html(`
-      <div class="tooltip-title">${d.dayLabel}</div>
-      <div class="tooltip-row">
-        <span class="tooltip-label">Feriado:</span>
-        <span class="tooltip-val">${HOLIDAY_MAP.find((h) => h.id === d.holiday)?.label || d.holiday}</span>
-      </div>
-      <div class="tooltip-row">
-        <span class="tooltip-label">Ano:</span>
-        <span class="tooltip-val">${d.year}</span>
-      </div>
-      <div class="tooltip-row tooltip-divider">
-        <span class="tooltip-label">Corridas Totais:</span>
-        <span class="tooltip-val highlight">${d.trips.toLocaleString("pt-BR")}</span>
-      </div>
-    `);
+        <div class="tooltip-title">${d.dayLabel}</div>
+        <div class="tooltip-row">
+          <span class="tooltip-label">Feriado:</span>
+          <span class="tooltip-val">${
+            HOLIDAY_MAP.find((h) => h.id === d.holiday)?.label || d.holiday
+          }</span>
+        </div>
+        <div class="tooltip-row">
+          <span class="tooltip-label">Ano:</span>
+          <span class="tooltip-val">${d.year}</span>
+        </div>
+        <div class="tooltip-row tooltip-divider">
+          <span class="tooltip-label">Corridas Totais:</span>
+          <span class="tooltip-val highlight">${d.trips.toLocaleString(
+            "pt-BR",
+          )}</span>
+        </div>
+      `);
     })
     .on("mousemove", function (event) {
       tooltip
@@ -194,15 +280,13 @@ export function renderHolidayHeatmap(data) {
         .style("top", event.pageY - 28 + "px");
     })
     .on("mouseout", function () {
-      d3.select(this)
-        .attr("stroke", "rgba(255,255,255,0.05)")
-        .attr("stroke-width", 1.5);
+      d3.select(this).attr("stroke", "#ecfdf5").attr("stroke-width", 1.5);
       tooltip.style("opacity", 0);
     });
 
   // Rótulo numérico centralizado dentro de cada célula.
-  // Nas células anotadas (pandemia/retomada), o número sobe levemente para
-  // deixar espaço para a micro-etiqueta textual abaixo.
+  // Nas células anotadas, o número sobe levemente para deixar espaço
+  // para a micro-etiqueta textual abaixo.
   g.selectAll("text.cell-val")
     .data(gridCells)
     .join("text")
@@ -216,16 +300,15 @@ export function renderHolidayHeatmap(data) {
     .attr("font-size", 11)
     .attr("font-weight", 700)
     .attr("fill", (d) => {
-      if (d.trips === null) return "#475569";
-      // Texto escuro nas células de ouro (alto volume) para manter contraste legível
-      return d.trips > maxTrips * 0.75 ? "#0f172a" : "#ffffff";
+      if (d.trips === null) return "#64748b";
+      return readableTextColor(colorScale(d.trips));
     })
     .text((d) => {
       if (d.trips === null) return "N/A";
       return d.trips >= 1000 ? `${(d.trips / 1000).toFixed(1)}k` : d.trips;
     });
 
-  // Micro-etiqueta colorida abaixo do número: "PANDEMIA" ou "RECUPERADO"
+  // Micro-etiqueta abaixo do número: "PANDEMIA" ou "RECUPERADO".
   g.selectAll("text.cell-tag")
     .data(markedCells)
     .join("text")
@@ -235,12 +318,12 @@ export function renderHolidayHeatmap(data) {
     .attr("text-anchor", "middle")
     .attr("font-size", 8.5)
     .attr("font-weight", 800)
-    .attr("fill", (d) => (d.isRecovery ? "#10b981" : "#ec4899"))
+    .attr("fill", (d) => (d.isRecovery ? recoveryColorDark : impactColor))
     .style("letter-spacing", "0.06em")
     .style("pointer-events", "none")
     .text((d) => (d.isRecovery ? "RECUPERADO" : "PANDEMIA"));
 
-  // Render Y Axis (Holiday Names in Portuguese)
+  // Render Y Axis: nomes dos feriados em português.
   const yAxis = d3
     .axisLeft(y)
     .tickFormat((id) => HOLIDAY_MAP.find((h) => h.id === id)?.label || id);
@@ -249,25 +332,26 @@ export function renderHolidayHeatmap(data) {
     .call(yAxis)
     .attr("font-size", 12)
     .selectAll("text")
-    .attr("fill", "#cbd5e1")
+    .attr("fill", "#334155")
     .attr("font-weight", 500);
 
-  g.selectAll(".tick line").attr("stroke", "none"); // Hide tick lines on Y-axis
-  g.selectAll(".domain").attr("stroke", "rgba(255,255,255,0.1)");
+  // Remove marcas do eixo Y e suaviza a linha do domínio.
+  g.selectAll(".tick line").attr("stroke", "none");
+  g.selectAll(".domain").attr("stroke", "#cbd5e1");
 
-  // Centered Y-axis Caption rotated -90 degrees on the far left margin
+  // Caption centralizado do eixo Y, rotacionado à esquerda.
   g.append("text")
     .attr("transform", "rotate(-90)")
     .attr("x", -height / 2)
     .attr("y", -175)
     .attr("text-anchor", "middle")
-    .attr("fill", "#94a3b8")
+    .attr("fill", "#475569")
     .attr("font-size", 13)
     .attr("font-weight", 600)
     .text("Feriados Oficiais dos Estados Unidos");
 
-  // Render X Axis (Years)
-  const xAxis = d3.axisBottom(x).tickFormat(d3.format("d")); // formatted as decimal/integer
+  // Render X Axis: anos.
+  const xAxis = d3.axisBottom(x).tickFormat(d3.format("d"));
 
   const xAxisG = g
     .append("g")
@@ -278,25 +362,28 @@ export function renderHolidayHeatmap(data) {
     .selectAll("text")
     .attr("font-size", 13)
     .attr("font-weight", 600)
-    .attr("fill", "#cbd5e1")
+    .attr("fill", "#334155")
     .attr("dy", "1.5em");
 
-  xAxisG.selectAll("line").attr("stroke", "rgba(255,255,255,0.1)");
-  xAxisG.select(".domain").attr("stroke", "rgba(255,255,255,0.1)");
+  xAxisG.selectAll("line").attr("stroke", "#cbd5e1");
+  xAxisG.select(".domain").attr("stroke", "#cbd5e1");
 
-  // Centered X-axis Caption below the years
+  // Caption centralizado do eixo X.
   g.append("text")
     .attr("x", width / 2)
     .attr("y", height + 54)
     .attr("text-anchor", "middle")
-    .attr("fill", "#94a3b8")
+    .attr("fill", "#475569")
     .attr("font-size", 13)
     .attr("font-weight", 600)
-    .text("Ano Civil (Comparação Temporal)");
+    .text("Anos");
 
-  // Heatmap Color Legend
-  const legendWidth = 320;
-  const legendHeight = 12;
+  /**
+   * Legenda do heatmap.
+   * Escala discreta de 6 faixas, com rótulos de intervalo personalizados.
+   */
+  const legendWidth = 360;
+  const legendHeight = 14;
   const legendX = margin.left;
   const legendY = 22;
 
@@ -304,82 +391,129 @@ export function renderHolidayHeatmap(data) {
     .append("g")
     .attr("transform", `translate(${legendX},${legendY})`);
 
+  const formatTripsShort = (value) => {
+    if (!Number.isFinite(value)) return "—";
+    return value >= 1000
+      ? `${(value / 1000).toFixed(1)}k`
+      : Math.round(value).toLocaleString("pt-BR");
+  };
+
   legendG
     .append("text")
     .attr("x", 0)
     .attr("y", -10)
     .attr("font-size", 12)
-    .attr("font-weight", 500)
-    .attr("fill", "#94a3b8")
-    .text("Volume de corridas (escala de cores contínua):");
+    .attr("font-weight", 600)
+    .attr("fill", "#166534")
+    .text("Volume de corridas");
 
-  // Create gradient definition
-  const defs = svg.append("defs");
-  const linearGradient = defs
-    .append("linearGradient")
-    .attr("id", "heatmap-grad");
+  const legendStepWidth = legendWidth / heatmapColors.length;
 
-  linearGradient
-    .selectAll("stop")
-    .data([
-      { offset: "0%", color: "#1e293b" },
-      { offset: "25%", color: "#4f46e5" },
-      { offset: "65%", color: "#db2777" },
-      { offset: "100%", color: "#f59e0b" },
-    ])
-    .join("stop")
-    .attr("offset", (d) => d.offset)
-    .attr("stop-color", (d) => d.color);
+  const legendItems = heatmapColors.map((color) => {
+    const [from, to] = colorScale.invertExtent(color);
 
-  // Draw gradient bar
-  legendG
+    return {
+      color,
+      from: from ?? minTrips,
+      to: to ?? maxTrips,
+    };
+  });
+
+  const legendSteps = legendG
+    .selectAll("g.legend-step")
+    .data(legendItems)
+    .join("g")
+    .attr("class", "legend-step")
+    .attr("transform", (_, i) => `translate(${i * legendStepWidth},0)`);
+
+  legendSteps
     .append("rect")
-    .attr("width", legendWidth)
+    .attr("width", legendStepWidth - 2)
     .attr("height", legendHeight)
     .attr("rx", 3)
-    .attr("fill", "url(#heatmap-grad)");
+    .attr("fill", (d) => d.color)
+    .attr("stroke", "#ecfdf5")
+    .attr("stroke-width", 1);
 
-  // Legend Min/Max labels
-  legendG
+  legendSteps
     .append("text")
-    .attr("x", 0)
-    .attr("y", legendHeight + 14)
-    .attr("font-size", 10)
-    .attr("fill", "#94a3b8")
-    .text("Baixo volume (0)");
+    .attr("x", legendStepWidth / 2)
+    .attr("y", legendHeight + 16)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 9.5)
+    .attr("fill", "#475569")
+    .text((d) => `${formatTripsShort(d.from)}–${formatTripsShort(d.to)}`);
 
-  legendG
-    .append("text")
-    .attr("x", legendWidth)
-    .attr("y", legendHeight + 14)
-    .attr("text-anchor", "end")
-    .attr("font-size", 10)
-    .attr("fill", "#94a3b8")
-    .text(`Alto volume (${maxTrips.toLocaleString("pt-BR")})`);
-
-  // Set highly polished interactive HTML explanation cards above the chart
+  /**
+   * Cards explicativos acima do gráfico.
+   * A caixa usa a mesma cor de superfície do heatmap; as cores semânticas
+   * aparecem apenas nos marcadores e nos títulos internos.
+   */
   const explanationEl = document.querySelector("#explanation");
+
   if (explanationEl) {
-    const recoveryLabel = recoveryPoint?.dayLabel?.split(" (")[0] ?? "—";
     const recoveryHoliday =
       HOLIDAY_MAP.find((h) => h.id === recoveryPoint?.holidayName)?.label ??
       recoveryPoint?.holidayName ??
       "—";
-    const impactLabel = impactPoint?.dayLabel?.split(" (")[0] ?? "—";
+
     const impactHoliday =
       HOLIDAY_MAP.find((h) => h.id === impactPoint?.holidayName)?.label ??
       impactPoint?.holidayName ??
       "—";
 
     explanationEl.innerHTML = `
-      <div style="display: flex; gap: 24px; flex-wrap: wrap; justify-content: flex-start; align-items: flex-start; background: rgba(30, 41, 59, 0.4); padding: 12px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05); margin-top: 8px;">
+      <div style="
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        align-items: flex-start;
+        background: ${heatmapSurfaceColor};
+        padding: 12px 20px;
+        border-radius: 12px;
+        border: 1px solid ${heatmapSurfaceBorder};
+        margin-top: 8px;
+        color: #334155;
+      ">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="display: inline-block; width: 10px; height: 10px; flex-shrink:0; border-radius: 50%; background-color: #ec4899; box-shadow: 0 0 8px #ec4899;"></span>
-          <span style="font-size: 0.85rem; font-family: var(--font-body);"><strong style="color: #ec4899;">Início da Pandemia — ${impactHoliday} ${impactPoint?.year ?? ""}</strong>: Queda &lt;60% da média histórica (${(impactPoint?.trips ?? 0).toLocaleString("pt-BR")} corridas).</span>
+          <span style="
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background-color: ${impactColor};
+            box-shadow: 0 0 8px rgba(146, 64, 14, 0.35);
+          "></span>
+          <span style="font-size: 0.85rem; font-family: var(--font-body);">
+            <strong style="color: ${impactColorDark};">
+              Início da Pandemia — ${impactHoliday} ${impactPoint?.year ?? ""}
+            </strong>:
+            Queda &lt;60% da média histórica (${(
+              impactPoint?.trips ?? 0
+            ).toLocaleString("pt-BR")} corridas).
+          </span>
         </div>
+
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="display: inline-block; width: 10px; height: 10px; flex-shrink:0; border-radius: 50%; background-color: #10b981; box-shadow: 0 0 8px #10b981;"></span>
-          <span style="font-size: 0.85rem; font-family: var(--font-body);"><strong style="color: #10b981;">Retomada — ${recoveryHoliday} ${recoveryPoint?.year ?? ""}</strong>: Primeiro feriado a retornar a ≥75% da demanda pré-pandemia (${(recoveryPoint?.trips ?? 0).toLocaleString("pt-BR")} corridas).</span>
+          <span style="
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background-color: ${recoveryColor};
+            box-shadow: 0 0 8px rgba(37, 99, 235, 0.35);
+          "></span>
+          <span style="font-size: 0.85rem; font-family: var(--font-body);">
+            <strong style="color: ${recoveryColorDark};">
+              Retomada — ${recoveryHoliday} ${recoveryPoint?.year ?? ""}
+            </strong>:
+            Primeiro feriado a retornar a ≥75% da demanda pré-pandemia (${(
+              recoveryPoint?.trips ?? 0
+            ).toLocaleString("pt-BR")} corridas).
+          </span>
         </div>
       </div>
     `;

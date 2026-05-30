@@ -1,23 +1,21 @@
-/* Import Google Fonts for professional visual appeal */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap");
-
 :root {
   --font-title: "Outfit", "Inter", system-ui, sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
 
-  --bg-gradient: radial-gradient(circle at top, #1e1b4b 0%, #0f172a 100%);
-  --panel-bg: rgba(30, 41, 59, 0.6);
-  --panel-border: rgba(255, 255, 255, 0.08);
+  /* Light theme */
+  --bg-gradient: #ffffff;
+  --panel-bg: #ffffff;
+  --panel-border: rgba(15, 23, 42, 0.12);
 
-  --color-text-primary: #f8fafc;
-  --color-text-secondary: #94a3b8;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
   --color-text-muted: #64748b;
 
-  --color-accent: #6366f1; /* Premium Indigo */
-  --color-accent-hover: #4f46e5;
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-success: #059669;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
 }
 
 * {
@@ -29,7 +27,6 @@ body {
   padding: 0;
   font-family: var(--font-body);
   background: var(--bg-gradient);
-  background-attachment: fixed;
   color: var(--color-text-primary);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
@@ -44,14 +41,14 @@ body {
   gap: 24px;
 }
 
-/* Premium Top Header bar */
+/* Top Header bar */
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
   gap: 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
   padding-bottom: 20px;
 }
 
@@ -66,7 +63,7 @@ body {
   background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
   padding: 6px 12px;
   border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.25);
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.22);
   animation: float 4s ease-in-out infinite;
 }
 
@@ -76,10 +73,9 @@ body {
   font-weight: 700;
   margin: 0;
   letter-spacing: -0.025em;
-  background: linear-gradient(to right, #f8fafc, #cbd5e1);
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--color-text-primary);
+  background: none;
+  -webkit-text-fill-color: initial;
 }
 
 /* Custom styled Select Dropdown container */
@@ -95,44 +91,42 @@ body {
   color: var(--color-text-primary);
   border-radius: 10px;
   border: 1px solid var(--panel-border);
-  background: rgba(15, 23, 42, 0.8);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
   cursor: pointer;
   outline: none;
   transition: all 0.25s ease;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23475569'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 14px center;
   background-size: 16px;
 }
 
 #viewSelect:hover {
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.15);
+  border-color: rgba(79, 70, 229, 0.5);
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.12);
 }
 
 #viewSelect:focus {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18);
 }
 
-/* Glassmorphic main panel */
+/* Main panel */
 .panel {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 20px;
   padding: 28px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
 .panel-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   padding-bottom: 16px;
 }
 
@@ -145,18 +139,19 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  color: var(--color-text-primary);
 }
 
 .question-badge {
-  background: rgba(99, 102, 241, 0.2);
-  color: #a5b4fc;
+  background: rgba(79, 70, 229, 0.1);
+  color: #4338ca;
   font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
   padding: 3px 8px;
   border-radius: 6px;
   letter-spacing: 0.05em;
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  border: 1px solid rgba(79, 70, 229, 0.25);
 }
 
 #explanation {
@@ -167,10 +162,10 @@ body {
 }
 
 .chart-wrapper {
-  background: rgba(15, 23, 42, 0.4);
+  background: #f8fafc;
   border-radius: 14px;
   padding: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   overflow-x: auto;
 }
 
@@ -185,7 +180,7 @@ svg {
 
 /* Tick lines and domain styles in D3 charts */
 .tick line {
-  stroke: rgba(255, 255, 255, 0.1);
+  stroke: rgba(15, 23, 42, 0.12);
 }
 
 .tick text {
@@ -195,10 +190,10 @@ svg {
 }
 
 .domain {
-  stroke: rgba(255, 255, 255, 0.15) !important;
+  stroke: rgba(15, 23, 42, 0.25) !important;
 }
 
-/* Breathing indicator status bar */
+/* Status bar */
 #status {
   display: inline-flex;
   align-items: center;
@@ -208,7 +203,7 @@ svg {
   border-radius: 20px;
   font-size: 0.85rem;
   font-weight: 500;
-  background: rgba(15, 23, 42, 0.6);
+  background: #f8fafc;
   border: 1px solid var(--panel-border);
 }
 
@@ -221,18 +216,18 @@ svg {
 
 .status-loading .status-dot {
   background-color: var(--color-warning);
-  box-shadow: 0 0 10px var(--color-warning);
+  box-shadow: 0 0 10px rgba(217, 119, 6, 0.45);
   animation: pulse-orange 1.5s infinite alternate;
 }
 
 .status-ready .status-dot {
   background-color: var(--color-success);
-  box-shadow: 0 0 10px var(--color-success);
+  box-shadow: 0 0 10px rgba(5, 150, 105, 0.4);
 }
 
 .status-error .status-dot {
   background-color: var(--color-error);
-  box-shadow: 0 0 10px var(--color-error);
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.45);
   animation: blink 0.8s infinite;
 }
 
@@ -248,7 +243,7 @@ svg {
   color: var(--color-error);
 }
 
-/* D3 Line styling smooth glows */
+/* D3 Line styling */
 path.domain {
   stroke-width: 1.5;
 }
@@ -284,15 +279,15 @@ svg circle:hover {
 @keyframes pulse-orange {
   0% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.35);
   }
   70% {
     transform: scale(1.1);
-    box-shadow: 0 0 0 6px rgba(245, 158, 11, 0);
+    box-shadow: 0 0 0 6px rgba(217, 119, 6, 0);
   }
   100% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0);
   }
 }
 
@@ -306,30 +301,28 @@ svg circle:hover {
   }
 }
 
-/* Highly polished tooltip for interactive cells */
+/* Tooltip for interactive cells */
 .chart-tooltip {
   position: absolute;
   padding: 12px 16px;
-  background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.14);
   border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  color: #f8fafc;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
+  color: var(--color-text-primary);
   font-family: var(--font-body);
   font-size: 0.85rem;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s ease;
   z-index: 1000;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 /* Tooltip structured content styles */
 .tooltip-title {
   font-weight: 700;
   margin-bottom: 6px;
-  color: #fbbf24;
+  color: #92400e;
 }
 
 .tooltip-row {
@@ -341,21 +334,22 @@ svg circle:hover {
 
 .tooltip-divider {
   margin-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid rgba(15, 23, 42, 0.12);
   padding-top: 6px;
 }
 
 .tooltip-label {
-  color: #94a3b8;
+  color: var(--color-text-secondary);
 }
 
 .tooltip-val {
   font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .tooltip-val.highlight {
   font-weight: 700;
-  color: #60a5fa;
+  color: #2563eb;
 }
 
 /* Heatmap cell interactive mouse states */
