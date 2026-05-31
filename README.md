@@ -1,20 +1,20 @@
 # TaxiVis — Manhattan & Feriados
 
-Este projeto é uma aplicação web de visualização de dados para analisar corridas de táxi amarelo em Manhattan durante feriados estadunidenses, com foco no período de julho de 2019 a dezembro de 2022. A aplicação utiliza dados da base **New York City Taxi and Limousine Commission (TLC) Trip Record Data**, processados diretamente no navegador com **DuckDB WASM** e visualizados com **D3.js**.
+Este projeto é uma aplicação web de visualização de dados para analisar corridas de táxi amarelo em Manhattan durante feriados estadunidenses, com foco no período de julho de 2019 a dezembro de 2022. A aplicação utiliza dados da base **New York City Taxi and Limousine Commission (TLC) Trip Record Data**, processados diretamente no navegador com **DuckDB** e visualizados com **D3.js**.
 
 ## Ideia geral
 
-A aplicação foi organizada em torno de múltiplas visualizações independentes, chamadas de *views*. Cada view responde a uma pergunta analítica específica sobre os dados, como volume de corridas, formas de pagamento, gorjetas médias e perfil horário das viagens.
+A aplicação foi organizada em torno de múltiplas visualizações independentes, no código chamadas de *views*. Cada view responde a uma pergunta analítica (ou um conjunto) específica sobre os dados, como volume de corridas, formas de pagamento, gorjetas médias e perfil horário das viagens.
 
 A lógica principal fica em `main.js`, que:
 
 1. monta a estrutura HTML da aplicação;
-2. inicializa a classe `Taxi`;
+2. inicializa a classe `Taxi` -- Dados;
 3. carrega e agrega os dados;
 4. preenche o seletor de visualizações;
 5. chama a função de renderização correspondente à view selecionada.
 
-As views recebem os dados já agregados e ficam responsáveis apenas por desenhar os gráficos com D3.
+As views recebem os dados já agregados e ficam responsáveis por desenhar os gráficos com D3.
 
 ## Estrutura do projeto
 
@@ -65,7 +65,7 @@ Isso permite adicionar ou remover visualizações alterando apenas esse catálog
 
 ### `taxi.js`
 
-Contém a classe `Taxi`, responsável pela camada de dados. Essa classe inicializa o DuckDB WASM, carrega os arquivos Parquet e executa as queries de agregação necessárias para as visualizações.
+Contém a classe `Taxi`, responsável pela camada de dados. Essa classe inicializa o DuckDB, carrega os arquivos Parquet e executa as queries de agregação necessárias para as visualizações.
 
 As principais agregações produzidas são:
 
