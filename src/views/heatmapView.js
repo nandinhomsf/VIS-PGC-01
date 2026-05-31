@@ -5,25 +5,71 @@ import { createBaseChart } from "../utils/chart";
  * Mapeamento de nomes canônicos dos feriados (usados como chave de agrupamento
  * nos dados do DuckDB) para rótulos em português exibidos no eixo Y do heatmap.
  * A ordem deste array define a sequência vertical das linhas no grid.
+ *
+ * `dateRule` aparece em texto menor junto ao nome do feriado no eixo Y.
+ * Para feriados fixos, usa-se a data do calendário; para feriados móveis,
+ * usa-se a regra baseada em dia da semana e mês.
  */
 const HOLIDAY_MAP = [
-  { id: "New Year", label: "Ano Novo" },
-  { id: "MLK Day", label: "Dia de Martin Luther King" },
-  { id: "Presidents Day", label: "Dia dos Presidentes" },
-  { id: "Memorial Day", label: "Memorial Day" },
-  { id: "Independence Day", label: "Independência" },
-  { id: "Labor Day", label: "Dia do Trabalho" },
-  { id: "Veterans Day", label: "Dia dos Veteranos" },
-  { id: "Thanksgiving", label: "Ação de Graças" },
-  { id: "Christmas", label: "Natal" },
+  { id: "New Year", label: "Ano Novo", dateRule: "01/janeiro" },
+  {
+    id: "MLK Day",
+    label: "Dia de Martin Luther King",
+    dateRule: "3ª segunda-feira/janeiro",
+  },
+  {
+    id: "Presidents Day",
+    label: "Dia dos Presidentes",
+    dateRule: "3ª segunda-feira/fevereiro",
+  },
+  {
+    id: "Memorial Day",
+    label: "Memorial Day",
+    dateRule: "última segunda-feira/maio",
+  },
+  {
+    id: "Independence Day",
+    label: "Independência",
+    dateRule: "04/julho",
+  },
+  {
+    id: "Labor Day",
+    label: "Dia do Trabalho",
+    dateRule: "1ª segunda-feira/setembro",
+  },
+  {
+    id: "Veterans Day",
+    label: "Dia dos Veteranos",
+    dateRule: "11/novembro",
+  },
+  {
+    id: "Thanksgiving",
+    label: "Ação de Graças",
+    dateRule: "4ª quinta-feira/novembro",
+  },
+  {
+    id: "Christmas",
+    label: "Natal",
+    dateRule: "25/dezembro",
+  },
 ];
+
+function getHolidayInfo(id) {
+  return (
+    HOLIDAY_MAP.find((h) => h.id === id) ?? {
+      id,
+      label: id,
+      dateRule: "",
+    }
+  );
+}
 
 export function renderHolidayHeatmap(data) {
   const { svg } = createBaseChart();
 
   // Margens à esquerda para acomodar os rótulos longos do eixo Y
-  // sem sobreposição com o grid. O heatmap ignora as margens padrão de createBaseChart.
-  const margin = { top: 80, right: 60, bottom: 96, left: 200 };
+  // e a regra/data em linha menor abaixo do nome do feriado.
+  const margin = { top: 80, right: 60, bottom: 96, left: 230 };
   const width = 1120 - margin.left - margin.right;
   const height = 660 - margin.top - margin.bottom;
 
@@ -88,7 +134,8 @@ export function renderHolidayHeatmap(data) {
 
   /**
    * Cores semânticas das marcações especiais.
-   * A pandemia usa âmbar/marrom 
+   * A pandemia e a retomada usam a mesma cor para manter unidade visual
+   * nas marcações de eventos importantes.
    */
   const impactColor = "#92400e";
   const impactColorDark = "#78350f";
@@ -119,8 +166,8 @@ export function renderHolidayHeatmap(data) {
     return luminance > 0.45 ? "#0f172a" : "#ffffff";
   }
 
-  // Linha de base pré-pandemia: média das corridas nos feriados até fev/2020. 
-  // A OMS decretou feriado em março/2020.
+  // Linha de base pré-pandemia: média das corridas nos feriados até fev/2020.
+  // A pandemia foi declarada em março/2020, então jan/fev funcionam como referência.
   const sortedSeries = [...data.holidaySeries].sort((a, b) =>
     a.dayISO.localeCompare(b.dayISO),
   );
@@ -218,9 +265,6 @@ export function renderHolidayHeatmap(data) {
   /**
    * Borda sobreposta nas células marcadas como impacto ou retomada.
    *
-   * O impacto usa âmbar/marrom para se diferenciar do volume de corridas.
-   * A retomada usa azul para não se confundir com a escala principal verde.
-   *
    * As etiquetas textuais ("PANDEMIA" / "RECUPERADO") evitam que a interpretação
    * dependa apenas da cor.
    */
@@ -258,9 +302,11 @@ export function renderHolidayHeatmap(data) {
         <div class="tooltip-title">${d.dayLabel}</div>
         <div class="tooltip-row">
           <span class="tooltip-label">Feriado:</span>
-          <span class="tooltip-val">${
-            HOLIDAY_MAP.find((h) => h.id === d.holiday)?.label || d.holiday
-          }</span>
+          <span class="tooltip-val">${getHolidayInfo(d.holiday).label}</span>
+        </div>
+        <div class="tooltip-row">
+          <span class="tooltip-label">Regra/Data:</span>
+          <span class="tooltip-val">${getHolidayInfo(d.holiday).dateRule}</span>
         </div>
         <div class="tooltip-row">
           <span class="tooltip-label">Ano:</span>
@@ -323,17 +369,34 @@ export function renderHolidayHeatmap(data) {
     .style("pointer-events", "none")
     .text((d) => (d.isRecovery ? "RECUPERADO" : "PANDEMIA"));
 
-  // Render Y Axis: nomes dos feriados em português.
-  const yAxis = d3
-    .axisLeft(y)
-    .tickFormat((id) => HOLIDAY_MAP.find((h) => h.id === id)?.label || id);
+  // Render Y Axis: nomes dos feriados em português + data/regra em texto menor.
+  const yAxis = d3.axisLeft(y).tickFormat("");
 
-  g.append("g")
-    .call(yAxis)
-    .attr("font-size", 12)
-    .selectAll("text")
+  const yAxisG = g.append("g").call(yAxis).attr("class", "y-axis");
+
+  yAxisG.selectAll(".tick text").remove();
+
+  const yTicks = yAxisG.selectAll(".tick");
+
+  yTicks
+    .append("text")
+    .attr("x", -10)
+    .attr("y", -3)
+    .attr("text-anchor", "end")
     .attr("fill", "#334155")
-    .attr("font-weight", 500);
+    .attr("font-size", 12)
+    .attr("font-weight", 700)
+    .text((id) => getHolidayInfo(id).label);
+
+  yTicks
+    .append("text")
+    .attr("x", -10)
+    .attr("y", 12)
+    .attr("text-anchor", "end")
+    .attr("fill", "#64748b")
+    .attr("font-size", 9.5)
+    .attr("font-weight", 600)
+    .text((id) => getHolidayInfo(id).dateRule);
 
   // Remove marcas do eixo Y e suaviza a linha do domínio.
   g.selectAll(".tick line").attr("stroke", "none");
@@ -343,7 +406,7 @@ export function renderHolidayHeatmap(data) {
   g.append("text")
     .attr("transform", "rotate(-90)")
     .attr("x", -height / 2)
-    .attr("y", -175)
+    .attr("y", -205)
     .attr("text-anchor", "middle")
     .attr("fill", "#475569")
     .attr("font-size", 13)
@@ -484,7 +547,7 @@ export function renderHolidayHeatmap(data) {
             flex-shrink: 0;
             border-radius: 50%;
             background-color: ${impactColor};
-            box-shadow: 0 0 8px rgba(146, 64, 14, 0.35);
+            box-shadow: 0 0 8px ${impactShadow};
           "></span>
           <span style="font-size: 0.85rem; font-family: var(--font-body);">
             <strong style="color: ${impactColorDark};">
@@ -504,7 +567,7 @@ export function renderHolidayHeatmap(data) {
             flex-shrink: 0;
             border-radius: 50%;
             background-color: ${recoveryColor};
-            box-shadow: 0 0 8px rgba(37, 99, 235, 0.35);
+            box-shadow: 0 0 8px ${recoveryShadow};
           "></span>
           <span style="font-size: 0.85rem; font-family: var(--font-body);">
             <strong style="color: ${recoveryColorDark};">
@@ -513,6 +576,29 @@ export function renderHolidayHeatmap(data) {
             Primeiro feriado a retornar a ≥75% da demanda pré-pandemia (${(
               recoveryPoint?.trips ?? 0
             ).toLocaleString("pt-BR")} corridas).
+          </span>
+        </div>
+
+        <div style="
+          flex-basis: 100%;
+          border-top: 1px solid rgba(15, 23, 42, 0.08);
+          padding-top: 10px;
+          margin-top: 2px;
+          font-size: 0.82rem;
+          font-family: var(--font-body);
+          color: #475569;
+        ">
+          <strong style="color: #0f172a;">
+            Perguntas respondidas por esta visualização:
+          </strong>
+          <span style="margin-left: 6px;">
+            Como o volume de corridas mudou nos feriados?
+          </span>
+          <span style="margin-left: 10px;">
+            Quando ocorreu o primeiro impacto?
+          </span>
+          <span style="margin-left: 10px;">
+            Quando surgiu o primeiro sinal de retomada?
           </span>
         </div>
       </div>

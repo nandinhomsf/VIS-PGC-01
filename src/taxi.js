@@ -18,21 +18,25 @@ export class Taxi {
   async init() {
     this.db = await loadDb();
     this.conn = await this.db.connect();
+
     await this.conn.query("SET threads=1; SET preserve_insertion_order=false;");
   }
 
   /**
    * Carrega os arquivos Parquet mensais via fetch, registra-os no DuckDB
-   * como buffers em memória e executa quatro queries de agregação em paralelo.
+   * como buffers em memória e executa as queries necessárias para as views:
    *
-   * A chave de cada arquivo (ex.: "T201907") é gerada a partir do mês para
-   * evitar colisões de nome no sistema de arquivos virtual do DuckDB WASM.
+   *  - `holidaySeries`:
+   *      total de corridas por feriado, usado no heatmap Feriado × Ano.
    *
-   * Retorna um objeto com quatro arrays enriquecidos com metadados de feriado:
-   *  - `passengers`: soma de passageiros por dia e macro-região.
-   *  - `tips`: média de gorjetas por dia e macro-região.
-   *  - `destinations`: top-10 destinos (DOLocationID) por dia de feriado.
-   *  - `holidaySeries`: total de corridas por dia (sem divisão por região).
+   *  - `holidayTipsByYear`:
+   *      gorjeta média por corrida em cada feriado e ano.
+   *
+   *  - `holidayPaymentShare`:
+   *      distribuição das formas de pagamento por feriado e ano.
+   *
+   *  - `holidayHourlyByYear`:
+   *      distribuição horária das corridas por feriado e ano.
    */
   async loadAndAggregate() {
     const files = [
@@ -83,65 +87,124 @@ export class Taxi {
     }));
 
     // Carrega cada arquivo Parquet na memória do DuckDB sequencialmente.
-    // Fazer em paralelo com Promise.all causaria pico de memória excessivo.
+    // Fazer em paralelo com Promise.all pode causar pico de memória no browser.
     for (const f of files) {
       const res = await fetch(f.url);
+
       await this.db.registerFileBuffer(
         f.key,
         new Uint8Array(await res.arrayBuffer()),
       );
     }
 
-    // Monta as strings SQL interpoladas a partir das constantes do projeto
+    // Monta as strings SQL interpoladas a partir das constantes do projeto.
     const fileKeys = `[${files.map((d) => `'${d.key}'`).join(",")}]`;
+
+    /**
+     * `union_by_name=true` evita erros quando os arquivos Parquet mensais
+     * possuem pequenas diferenças de schema entre si.
+     */
+    const parquetSource = `read_parquet(${fileKeys}, union_by_name=true)`;
+
     const zoneList = MANHATTAN_ZONES.join(",");
     const holidayList = HOLIDAYS.map((d) => `DATE '${d}'`).join(",");
 
     /**
-     * Expressão CASE que classifica cada zona de embarque em uma
-     * das três macro-regiões de Manhattan para simplificar a análise.
-     * Os IDs foram atribuídos manualmente com base no mapa de zonas da NYC TLC.
+     * As queries são executadas em paralelo:
+     *
+     * 1. `holidaySeries` mede volume total de corridas por feriado.
+     * 2. `holidayTipsByYear` mede gorjeta média por corrida em cada feriado.
+     * 3. `holidayPaymentShare` mede a composição das formas de pagamento.
+     * 4. `holidayHourlyByYear` mede o número de corridas por hora do dia.
+     *
+     * Para `payment_type`, usamos apenas códigos com pagamento efetivo:
+     * 0 = Flex Fare trip
+     * 1 = Credit card
+     * 2 = Cash
      */
-    const macroRegionSql = `
-      CASE
-        WHEN PULocationID IN (24,41,42,43,74,75,116,151,152,166) THEN 'Downtown'
-        WHEN PULocationID IN (48,50,68,79,90,100,107,113,114,125,137,140,141,142,143,144,148,229,230,231,233,234) THEN 'Midtown'
-        ELSE 'Uptown'
-      END
-    `;
+    const [
+      holidaySeries,
+      holidayTipsByYear,
+      holidayPaymentShare,
+      holidayHourlyByYear,
+    ] = await Promise.all([
+      this.query(
+        `
+        SELECT
+          CAST(tpep_pickup_datetime AS DATE) AS day,
+          COUNT(*) AS trips
+        FROM ${parquetSource}
+        WHERE
+          PULocationID IN (${zoneList})
+          AND CAST(tpep_pickup_datetime AS DATE) IN (${holidayList})
+        GROUP BY day
+        ORDER BY day;
+        `,
+      ),
 
-    // Executa as quatro queries analíticas em paralelo para minimizar o tempo de espera
-    const [passengers, tips, destinations, holidaySeries] = await Promise.all([
       this.query(
-        `SELECT CAST(tpep_pickup_datetime AS DATE) AS day, ${macroRegionSql} AS region, SUM(passenger_count) AS passengers FROM read_parquet(${fileKeys}) WHERE PULocationID IN (${zoneList}) AND CAST(tpep_pickup_datetime AS DATE) IN (${holidayList}) GROUP BY day, region ORDER BY day, region;`,
+        `
+        SELECT
+          CAST(tpep_pickup_datetime AS DATE) AS day,
+          COUNT(*) AS trips,
+          SUM(tip_amount) AS total_tip,
+          AVG(tip_amount) AS avg_tip
+        FROM ${parquetSource}
+        WHERE
+          PULocationID IN (${zoneList})
+          AND CAST(tpep_pickup_datetime AS DATE) IN (${holidayList})
+          AND tip_amount IS NOT NULL
+          AND tip_amount >= 0
+        GROUP BY day
+        ORDER BY day;
+        `,
       ),
+
       this.query(
-        `SELECT CAST(tpep_pickup_datetime AS DATE) AS day, ${macroRegionSql} AS region, AVG(tip_amount) AS avg_tip FROM read_parquet(${fileKeys}) WHERE PULocationID IN (${zoneList}) AND CAST(tpep_pickup_datetime AS DATE) IN (${holidayList}) GROUP BY day, region ORDER BY day, region;`,
+        `
+        SELECT
+          CAST(tpep_pickup_datetime AS DATE) AS day,
+          CAST(payment_type AS INTEGER) AS payment_type,
+          COUNT(*) AS trips
+        FROM ${parquetSource}
+        WHERE
+          PULocationID IN (${zoneList})
+          AND CAST(tpep_pickup_datetime AS DATE) IN (${holidayList})
+          AND payment_type IN (0, 1, 2)
+        GROUP BY day, payment_type
+        ORDER BY day, payment_type;
+        `,
       ),
-      // QUALIFY filtra apenas o top-10 destinos por dia, evitando subquery
+
       this.query(
-        `SELECT CAST(tpep_pickup_datetime AS DATE) AS day, DOLocationID AS destination, COUNT(*) AS trips FROM read_parquet(${fileKeys}) WHERE PULocationID IN (${zoneList}) AND CAST(tpep_pickup_datetime AS DATE) IN (${holidayList}) GROUP BY day, destination QUALIFY ROW_NUMBER() OVER (PARTITION BY day ORDER BY trips DESC) <= 10 ORDER BY day, trips DESC;`,
-      ),
-      this.query(
-        `SELECT CAST(tpep_pickup_datetime AS DATE) AS day, COUNT(*) AS trips FROM read_parquet(${fileKeys}) WHERE PULocationID IN (${zoneList}) AND CAST(tpep_pickup_datetime AS DATE) IN (${holidayList}) GROUP BY day ORDER BY day;`,
+        `
+        SELECT
+          CAST(tpep_pickup_datetime AS DATE) AS day,
+          CAST(EXTRACT('hour' FROM tpep_pickup_datetime) AS INTEGER) AS pickup_hour,
+          COUNT(*) AS trips
+        FROM ${parquetSource}
+        WHERE
+          PULocationID IN (${zoneList})
+          AND tpep_pickup_datetime IS NOT NULL
+          AND CAST(tpep_pickup_datetime AS DATE) IN (${holidayList})
+        GROUP BY day, pickup_hour
+        ORDER BY day, pickup_hour;
+        `,
       ),
     ]);
 
     return {
-      passengers: passengers.map((d) => enrichHoliday(d)),
-      tips: tips.map((d) => enrichHoliday(d)),
-      destinations: destinations.map((d) => ({
-        ...enrichHoliday(d),
-        destinationLabel: `Zona ${d.destination}`,
-      })),
       holidaySeries: holidaySeries.map((d) => enrichHoliday(d)),
+      holidayTipsByYear: holidayTipsByYear.map((d) => enrichHoliday(d)),
+      holidayPaymentShare: holidayPaymentShare.map((d) => enrichHoliday(d)),
+      holidayHourlyByYear: holidayHourlyByYear.map((d) => enrichHoliday(d)),
     };
   }
 
   /**
    * Executa uma query SQL e retorna os resultados como array de objetos planos.
-   * O método `normalizeRow` converte campos `bigint` (tipo padrão de COUNT no DuckDB)
-   * para `number`, garantindo compatibilidade com D3 e operações aritméticas.
+   * O método `normalizeRow` converte campos `bigint`, tipo padrão de COUNT
+   * no DuckDB, para `number`, garantindo compatibilidade com D3.
    */
   async query(sql) {
     const result = await this.conn.query(sql);
