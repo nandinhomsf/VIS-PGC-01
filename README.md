@@ -146,5 +146,3 @@ http://localhost:5173
 ## Observações
 
 A aplicação processa os arquivos Parquet diretamente no navegador usando DuckDB. Por isso, arquivos muito grandes podem impactar o tempo de carregamento e o consumo de memória. Para melhorar o desempenho, o carregamento dos arquivos é feito sequencialmente e as visualizações reutilizam os dados agregados em memória, evitando repetir consultas pesadas a cada troca de gráfico.
-
-```
