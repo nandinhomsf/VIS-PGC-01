@@ -1,4 +1,3 @@
-````md
 # TaxiVis — Manhattan & Feriados
 
 Este projeto é uma aplicação web de visualização de dados para analisar corridas de táxi amarelo em Manhattan durante feriados estadunidenses, com foco no período de julho de 2019 a dezembro de 2022. A aplicação utiliza dados da base **New York City Taxi and Limousine Commission (TLC) Trip Record Data**, processados diretamente no navegador com **DuckDB WASM** e visualizados com **D3.js**.
@@ -148,5 +147,4 @@ http://localhost:5173
 
 A aplicação processa os arquivos Parquet diretamente no navegador usando DuckDB. Por isso, arquivos muito grandes podem impactar o tempo de carregamento e o consumo de memória. Para melhorar o desempenho, o carregamento dos arquivos é feito sequencialmente e as visualizações reutilizam os dados agregados em memória, evitando repetir consultas pesadas a cada troca de gráfico.
 
-```
 ```
