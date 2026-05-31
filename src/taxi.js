@@ -91,7 +91,7 @@ export class Taxi {
       "2022-12",
     ].map((m) => ({
       key: `T${m.replace("-", "")}`,
-      url: `data/parquet/yellow_tripdata_${m}.parquet`,
+      url: `data/parquet_holidays/yellow_tripdata_${m}.parquet`,
     }));
 
     /**
