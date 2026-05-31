@@ -2,12 +2,16 @@ import * as d3 from "d3";
 import { createBaseChart } from "../utils/chart";
 
 /**
- * Mapeamento de nomes canônicos dos feriados para rótulos em português.
- * A ordem define a distribuição dos pequenos múltiplos no grid.
+ * Mapeamento dos feriados usados na análise.
  *
- * `dateRule` aparece no título de cada subgráfico. Para feriados fixos,
- * usa-se a data do calendário; para feriados móveis, usa-se a regra
- * baseada em dia da semana e mês.
+ * O `id` precisa bater com o nome canônico produzido na etapa de agregação.
+ * O `label` é o nome mostrado na interface.
+ * O `dateRule` aparece no cabeçalho de cada painel para contextualizar a data
+ * ou regra de ocorrência do feriado.
+ *
+ * A ordem deste array define a ordem dos pequenos múltiplos no grid.
+ * 
+ * Ponto de melhoria futura: extrair dinamicamente dos dados ou de uma API de feriados.
  */
 const HOLIDAY_MAP = [
   { id: "New Year", label: "Ano Novo", dateRule: "01/janeiro" },
@@ -41,23 +45,36 @@ const HOLIDAY_MAP = [
   { id: "Christmas", label: "Natal", dateRule: "25/dezembro" },
 ];
 
+/**
+ * Anos comparados nas visualizações.
+ *
+ * A ordem é fixa para manter consistência entre painéis, legenda e linhas
+ * dos histogramas.
+ * 
+ * Ponto de melhoria futura: extrair dinamicamente dos dados.
+ */
 const YEAR_DOMAIN = [2019, 2020, 2021, 2022];
 
 /**
- * Códigos de pagamento considerados na análise.
+ * Categorias de pagamento mantidas na análise.
  *
- * A visualização usa apenas categorias que representam uma forma efetiva
- * de pagamento:
+ * A visualização usa apenas categorias que indicam uma forma efetiva de pagamento:
  *
  * 0 = Flex Fare trip
  * 1 = Credit card
  * 2 = Cash
  *
- * As categorias 3, 4, 5 e 6 são excluídas ainda na query da classe Taxi:
+ * As categorias 3, 4, 5 e 6 são removidas na query da classe Taxi porque
+ * representam situações administrativas ou não comparáveis como forma de
+ * pagamento principal:
+ *
  * 3 = No charge
  * 4 = Dispute
  * 5 = Unknown
  * 6 = Voided trip
+ *
+ * Como a legenda e o tooltip mostram os nomes das categorias, a cor serve como
+ * apoio visual e não como única forma de identificação.
  */
 const PAYMENT_TYPES = [
   {
@@ -70,19 +87,24 @@ const PAYMENT_TYPES = [
     id: 2,
     label: "Dinheiro",
     fullLabel: "Cash",
-    color: "#16a34a",
+    color: "#238b45",
   },
   {
     id: 0,
     label: "Flex Fare",
     fullLabel: "Flex Fare trip",
-    color: "#92400e",
+    color: "#b45309",
   },
 ];
 
 /**
  * Formata a data real do feriado para o tooltip.
+ *
+ * Quando `dayISO` está disponível, usamos diretamente a string ISO.
  * Exemplo: "2020-12-25" vira "25/12".
+ *
+ * O fallback tenta extrair uma data ISO de `dayLabel`, caso a data tenha vindo
+ * embutida no rótulo textual. Se nenhuma data for encontrada, retorna "—".
  */
 function formatDateShort(dayISO, dayLabel) {
   if (dayISO && /^\d{4}-\d{2}-\d{2}$/.test(dayISO)) {
@@ -101,27 +123,53 @@ function formatDateShort(dayISO, dayLabel) {
 }
 
 /**
- * Visualização de formas de pagamento em feriados.
+ * Renderiza a visualização de formas de pagamento em feriados.
  *
  * Cada painel representa um feriado.
  * Cada barra representa um ano.
- * Cada segmento mostra a proporção de corridas por forma de pagamento.
+ * Cada segmento representa a participação de uma forma de pagamento naquele
+ * feriado e ano.
  *
- * O uso de barras empilhadas 100% prioriza a composição das formas de
- * pagamento, evitando que a queda no volume total de corridas durante a
- * pandemia domine a leitura.
+ * O uso de barras 100% empilhadas é importante porque a pergunta principal não
+ * é o volume absoluto de corridas, mas sim a composição das formas de pagamento.
+ * Assim, mesmo que 2020 tenha muito menos corridas, ainda conseguimos comparar
+ * se a distribuição entre cartão, dinheiro e Flex Fare mudou.
  */
 export function renderHolidayPaymentShareStackedBarsView(data) {
   const { svg } = createBaseChart();
 
+  /**
+   * Margens gerais da visualização.
+   *
+   * A área superior acomoda a legenda. A área esquerda não precisa ser tão grande
+   * porque os nomes dos feriados ficam dentro dos próprios painéis, não em um
+   * eixo Y global.
+   */
   const margin = { top: 78, right: 48, bottom: 56, left: 70 };
   const width = 1120 - margin.left - margin.right;
   const height = 660 - margin.top - margin.bottom;
 
+  /**
+   * Grupo principal deslocado pelas margens.
+   *
+   * A partir daqui, os painéis são posicionados em coordenadas locais dentro
+   * da área útil do SVG.
+   */
   const root = svg
     .append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
+  /**
+   * Filtra apenas registros válidos para a visualização.
+   *
+   * O dado precisa ter:
+   * - número de corridas válido;
+   * - código de pagamento válido;
+   * - código presente em `PAYMENT_TYPES`.
+   *
+   * Esse filtro protege a etapa de montagem das barras contra valores nulos ou
+   * categorias removidas na análise.
+   */
   const rawRows = (data.holidayPaymentShare || []).filter(
     (d) =>
       Number.isFinite(d.trips) &&
@@ -131,8 +179,9 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
 
   /**
    * Índice por feriado, ano e tipo de pagamento.
-   * Facilita montar uma matriz completa mesmo quando algum tipo não aparece
-   * em determinado feriado/ano.
+   *
+   * A chave composta permite recuperar rapidamente o valor de uma categoria
+   * específica sem precisar procurar no array inteiro repetidamente.
    */
   const dataMap = new Map();
 
@@ -141,10 +190,13 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
   });
 
   /**
-   * Monta uma série completa para cada feriado:
-   * - 9 feriados;
-   * - 4 anos por feriado;
-   * - 3 tipos de pagamento por ano.
+   * Monta uma matriz completa para a visualização.
+   *
+   * Para cada feriado, criamos quatro anos.
+   * Para cada ano, criamos as três categorias de pagamento.
+   *
+   * Mesmo que uma categoria não apareça em um feriado/ano, ela entra com
+   * `trips = 0`. Isso mantém a estrutura visual estável em todos os painéis.
    */
   const holidayPanels = HOLIDAY_MAP.map((holiday) => {
     const years = YEAR_DOMAIN.map((year) => {
@@ -166,9 +218,24 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
         };
       });
 
+      /**
+       * Total de corridas válidas naquele feriado/ano.
+       *
+       * Esse total é usado como denominador para transformar as contagens em
+       * proporções, já que a visualização é empilhada em 100%.
+       */
       const total = d3.sum(values, (d) => d.trips);
       const dateSource = values.find((d) => d.dayISO || d.dayLabel);
 
+      /**
+       * Calcula os intervalos acumulados de cada segmento.
+       *
+       * `x0` é o início do segmento na escala percentual.
+       * `x1` é o fim do segmento.
+       *
+       * Esses valores são depois passados para a escala X, que transforma
+       * proporções entre 0 e 1 em posições e larguras no SVG.
+       */
       let acc = 0;
       const stackedValues = values.map((d) => {
         const share = total > 0 ? d.trips / total : 0;
@@ -205,20 +272,39 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
   });
 
   /**
-   * Layout em pequenos múltiplos: 3 colunas × 3 linhas.
-   * Essa estrutura mantém os feriados como foco principal da análise.
+   * Layout em pequenos múltiplos.
+   *
+   * O grid 3 × 3 permite mostrar os nove feriados sem misturar tudo em um único
+   * gráfico. Cada painel funciona como uma mini-visualização independente.
    */
   const cols = 3;
   const rows = 3;
   const panelWidth = width / cols;
   const panelHeight = height / rows;
 
+  /**
+   * Margens internas de cada painel.
+   *
+   * O topo acomoda o título e a regra/data do feriado.
+   * A esquerda acomoda os rótulos dos anos.
+   */
   const innerMargin = { top: 48, right: 18, bottom: 28, left: 38 };
   const innerWidth = panelWidth - innerMargin.left - innerMargin.right;
   const innerHeight = panelHeight - innerMargin.top - innerMargin.bottom;
 
+  /**
+   * Escala X percentual.
+   *
+   * Como cada barra é empilhada em 100%, o domínio é fixo de 0 a 1.
+   * Isso permite comparar diretamente as proporções entre anos e feriados.
+   */
   const x = d3.scaleLinear().domain([0, 1]).range([0, innerWidth]);
 
+  /**
+   * Escala Y dos anos dentro de cada painel.
+   *
+   * Cada ano ocupa uma faixa horizontal. O padding cria respiro entre as barras.
+   */
   const y = d3
     .scaleBand()
     .domain(YEAR_DOMAIN)
@@ -226,10 +312,11 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .padding(0.28);
 
   /**
-   * Cores e superfícies.
-   * O fundo claro mantém consistência com as demais views.
-   * O ano de 2020 recebe uma marcação sutil por ser o período de impacto
-   * inicial da pandemia.
+   * Cores de superfície, texto, grade e destaque.
+   *
+   * O fundo claro mantém a visualização coerente com o restante do dashboard.
+   * A linha de 2020 recebe um destaque sutil para facilitar a comparação com o
+   * ano de impacto inicial, sem competir com as cores das categorias.
    */
   const surfaceColor = "#f8fafc";
   const panelBorder = "rgba(15, 23, 42, 0.08)";
@@ -240,6 +327,12 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
   const gridColor = "#e2e8f0";
   const impactColor = "#92400e";
 
+  /**
+   * Tooltip único compartilhado pela visualização.
+   *
+   * O padrão `selectAll(...).data([null]).join(...)` evita criar múltiplos
+   * tooltips quando a visualização é renderizada mais de uma vez.
+   */
   const tooltip = d3
     .select("body")
     .selectAll(".chart-tooltip")
@@ -247,6 +340,11 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .join("div")
     .attr("class", "chart-tooltip");
 
+  /**
+   * Cria os painéis dos feriados.
+   *
+   * O índice do painel é usado para calcular coluna e linha no grid.
+   */
   const panels = root
     .selectAll("g.payment-panel")
     .data(holidayPanels)
@@ -258,7 +356,12 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
       return `translate(${col * panelWidth},${row * panelHeight})`;
     });
 
-  // Fundo de cada painel.
+  /**
+   * Fundo de cada painel.
+   *
+   * O retângulo arredondado cria separação visual entre os feriados e dá ao
+   * conjunto uma aparência de cards.
+   */
   panels
     .append("rect")
     .attr("x", 8)
@@ -269,7 +372,9 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .attr("fill", surfaceColor)
     .attr("stroke", panelBorder);
 
-  // Título do feriado em cada painel.
+  /**
+   * Título do feriado.
+   */
   panels
     .append("text")
     .attr("x", 18)
@@ -279,7 +384,12 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .attr("font-weight", 800)
     .text((d) => d.label);
 
-  // Regra/data do feriado no cabeçalho do painel.
+  /**
+   * Regra/data do feriado.
+   *
+   * Essa segunda linha é útil principalmente para feriados móveis, como
+   * Thanksgiving e Memorial Day.
+   */
   panels
     .append("text")
     .attr("x", 18)
@@ -289,11 +399,21 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .attr("font-weight", 600)
     .text((d) => d.dateRule);
 
+  /**
+   * Grupo interno de desenho de cada painel.
+   *
+   * Os elementos do gráfico ficam deslocados para não sobrepor o cabeçalho.
+   */
   const plot = panels
     .append("g")
     .attr("transform", `translate(${innerMargin.left},${innerMargin.top})`);
 
-  // Destaque sutil para o ano de impacto inicial.
+  /**
+   * Destaque horizontal para o ano de 2020.
+   *
+   * A marcação fica atrás das barras. Ela serve como referência visual, mas é
+   * propositalmente translúcida para não atrapalhar a leitura dos segmentos.
+   */
   plot
     .append("rect")
     .attr("x", 0)
@@ -303,7 +423,12 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .attr("rx", 6)
     .attr("fill", yearHighlight);
 
-  // Grade vertical em 0%, 50% e 100%.
+  /**
+   * Grade vertical em 0%, 50% e 100%.
+   *
+   * Como as barras representam proporções, esses três pontos são suficientes
+   * para orientar a leitura sem deixar o painel visualmente carregado.
+   */
   plot
     .append("g")
     .call(
@@ -319,6 +444,14 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
 
   plot.selectAll(".domain").remove();
 
+  /**
+   * Cria um grupo para cada barra anual.
+   *
+   * Cada grupo contém:
+   * - o fundo cinza da barra;
+   * - os segmentos empilhados;
+   * - eventualmente o texto "sem dados".
+   */
   const yearGroups = plot
     .selectAll("g.year-row")
     .data((d) => d.years)
@@ -326,7 +459,12 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .attr("class", "year-row")
     .attr("transform", (d) => `translate(0,${y(d.year)})`);
 
-  // Fundo de cada barra anual.
+  /**
+   * Fundo de cada barra.
+   *
+   * Ele aparece quando não há dados ou quando os segmentos não ocupam toda a
+   * área por algum arredondamento visual.
+   */
   yearGroups
     .append("rect")
     .attr("x", 0)
@@ -336,7 +474,12 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .attr("rx", 5)
     .attr("fill", emptyBarColor);
 
-  // Segmentos empilhados de pagamento.
+  /**
+   * Segmentos empilhados de pagamento.
+   *
+   * Cada segmento usa `x0` e `x1`, calculados anteriormente, para determinar
+   * sua posição e largura. A escala X converte a proporção em pixels.
+   */
   yearGroups
     .selectAll("rect.payment-segment")
     .data((d) => d.values.filter((v) => v.total > 0 && v.share > 0))
@@ -396,7 +539,11 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
       tooltip.style("opacity", 0);
     });
 
-  // Rótulo para anos sem dados disponíveis.
+  /**
+   * Texto para anos sem dados.
+   *
+   * Ele só aparece quando o total da barra é zero.
+   */
   yearGroups
     .filter((d) => d.total === 0)
     .append("text")
@@ -408,7 +555,11 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
     .attr("font-weight", 600)
     .text("sem dados");
 
-  // Eixo Y com os anos.
+  /**
+   * Eixo Y interno com os anos.
+   *
+   * O ano de 2020 recebe a cor de destaque usada no restante do dashboard.
+   */
   const yAxis = d3.axisLeft(y).tickFormat(d3.format("d")).tickSize(0);
 
   const yAxisG = plot.append("g").call(yAxis);
@@ -421,7 +572,11 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
 
   yAxisG.select(".domain").remove();
 
-  // Eixo X percentual compacto em cada painel.
+  /**
+   * Eixo X percentual compacto.
+   *
+   * Ele é repetido em cada painel para facilitar a leitura local das barras.
+   */
   const xAxis = d3
     .axisBottom(x)
     .tickValues([0, 0.5, 1])
@@ -442,10 +597,15 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
   xAxisG.select(".domain").attr("stroke", "#cbd5e1");
 
   /**
-   * Legenda superior.
-   * Explica as três categorias de pagamento mantidas na visualização.
+   * Legenda superior das categorias de pagamento.
+   *
+   * A legenda usa as mesmas cores dos segmentos empilhados e mostra também o
+   * código numérico da categoria, mantendo relação direta com o dicionário dos
+   * dados.
    */
-  const legend = svg.append("g").attr("transform", `translate(${margin.left},28)`);
+  const legend = svg
+    .append("g")
+    .attr("transform", `translate(${margin.left},28)`);
 
   const legendItems = legend
     .selectAll("g.legend-item")
@@ -474,8 +634,10 @@ export function renderHolidayPaymentShareStackedBarsView(data) {
 
   /**
    * Resumo textual acima do gráfico.
-   * Os percentuais anuais são calculados a partir da soma das corridas
-   * por forma de pagamento em todos os feriados disponíveis naquele ano.
+   *
+   * Aqui os percentuais são calculados somando todos os feriados de cada ano.
+   * O objetivo é fornecer uma leitura geral antes de o usuário investigar os
+   * painéis individualmente.
    */
   const explanationEl = document.querySelector("#explanation");
 

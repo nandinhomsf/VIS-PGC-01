@@ -2,13 +2,15 @@ import * as d3 from "d3";
 import { createBaseChart } from "../utils/chart";
 
 /**
- * Mapeamento de nomes canônicos dos feriados (usados como chave de agrupamento
- * nos dados do DuckDB) para rótulos em português exibidos no eixo Y do heatmap.
- * A ordem deste array define a sequência vertical das linhas no grid.
+ * Mapeamento entre os nomes canônicos dos feriados, usados nos dados agregados,
+ * e os rótulos exibidos na visualização.
  *
- * `dateRule` aparece em texto menor junto ao nome do feriado no eixo Y.
- * Para feriados fixos, usa-se a data do calendário; para feriados móveis,
- * usa-se a regra baseada em dia da semana e mês.
+ * A ordem deste array também define a ordem vertical dos feriados no heatmap.
+ *
+ * `dateRule` é mostrado em texto menor no eixo Y. Para feriados fixos, usamos
+ * a data do calendário; para feriados móveis, usamos a regra de ocorrência.
+ * 
+ * Ponto de melhoria futura: extrair dinamicamente dos dados ou de uma API de feriados.
  */
 const HOLIDAY_MAP = [
   { id: "New Year", label: "Ano Novo", dateRule: "01/janeiro" },
@@ -54,6 +56,12 @@ const HOLIDAY_MAP = [
   },
 ];
 
+/**
+ * Busca as informações de exibição de um feriado.
+ *
+ * O fallback evita quebrar a visualização caso apareça algum nome de feriado
+ * inesperado nos dados. Nesse caso, o próprio id é usado como rótulo.
+ */
 function getHolidayInfo(id) {
   return (
     HOLIDAY_MAP.find((h) => h.id === id) ?? {
@@ -64,53 +72,91 @@ function getHolidayInfo(id) {
   );
 }
 
+/**
+ * Renderiza o heatmap principal de volume de corridas.
+ *
+ * Cada célula representa um par feriado × ano.
+ * A cor da célula representa o número total de corridas naquele feriado.
+ * Além do volume, a visualização destaca automaticamente:
+ * - o primeiro feriado com queda forte em relação ao pré-pandemia;
+ * - o primeiro feriado com sinal de retomada.
+ */
 export function renderHolidayHeatmap(data) {
   const { svg } = createBaseChart();
 
-  // Margens à esquerda para acomodar os rótulos longos do eixo Y
-  // e a regra/data em linha menor abaixo do nome do feriado.
+  /**
+   * O heatmap usa margens próprias em vez das margens padrão de createBaseChart.
+   *
+   * A margem esquerda é maior porque o eixo Y tem rótulos longos e uma segunda
+   * linha com a data/regra do feriado. Sem esse espaço extra, os textos ficariam
+   * cortados ou muito próximos do grid.
+   */
   const margin = { top: 80, right: 60, bottom: 96, left: 230 };
   const width = 1120 - margin.left - margin.right;
   const height = 660 - margin.top - margin.bottom;
 
+  /**
+   * Grupo principal do gráfico.
+   *
+   * Deslocar um grupo `<g>` pelas margens e desenhar o gráfico
+   * dentro dele. Assim, escalas, células e eixos trabalham em coordenadas locais
+   * começando em (0, 0), enquanto o espaço externo fica reservado para legendas,
+   * títulos e rótulos.
+   */
   const g = svg
     .append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-  // Domínio Y: ordem cronológica dos feriados | Domínio X: anos da análise.
+  /**
+   * Domínios fixos do heatmap.
+   *
+   * O eixo Y usa os feriados em ordem definida manualmente.
+   * O eixo X usa os anos analisados no projeto.
+   */
   const yDomain = HOLIDAY_MAP.map((d) => d.id);
   const xDomain = [2019, 2020, 2021, 2022];
 
-  // scaleBand garante células de largura uniforme com espaçamento entre elas.
+  /**
+   * Escalas de banda para formar a grade do heatmap.
+   *
+   * `scaleBand` é adequada para eixos categóricos. Aqui, cada ano e cada feriado
+   * recebem uma faixa com largura/altura uniforme. O padding cria pequenos
+   * espaços entre as células, melhorando a leitura do grid.
+   */
   const x = d3.scaleBand().domain(xDomain).range([0, width]).padding(0.04);
   const y = d3.scaleBand().domain(yDomain).range([0, height]).padding(0.04);
 
   /**
-   * Valores numéricos válidos usados pela escala de cor.
-   * Células sem dados ficam fora da escala e recebem uma cor neutra própria.
+   * Valores válidos usados para construir a escala de cor.
+   *
+   * Removemos valores ausentes ou inválidos para que a escala represente apenas
+   * células reais. Células sem dados recebem uma cor neutra separada.
    */
   const tripsValues = data.holidaySeries
     .map((d) => d.trips)
     .filter((v) => Number.isFinite(v));
 
-  // Valores de referência usados nos rótulos da legenda e como fallback.
+  /**
+   * Valores de referência para a legenda e para casos de fallback.
+   *
+   * Se por algum motivo não houver dados, usamos valores padrão para evitar que
+   * a escala e a legenda quebrem.
+   */
   const maxTrips = d3.max(tripsValues) || 10000;
   const minTrips = d3.min(tripsValues) || 0;
 
   /**
-   * Paleta Greens em 6 faixas discretas.
+   * Paleta Greens em seis faixas discretas.
    *
-   * O verde foi escolhido por funcionar bem para uma medida única e ordenada
-   * de volume: tons claros indicam menor intensidade e tons escuros indicam
-   * maior intensidade. A escala evita amarelo, vermelho e roxo, mantendo uma
-   * leitura mais limpa em fundo branco.
+   * O heatmap representa uma única medida ordenada: volume de corridas.
+   * Por isso, uma escala sequencial de uma cor já é boa.
    *
-   * A escala é amostrada entre 0.14 e 0.88 para evitar os extremos:
-   * - valores muito próximos de 0 ficam claros demais;
-   * - valores muito próximos de 1 ficam escuros demais.
+   * A escala é amostrada entre 0.14 e 0.88 para evitar extremos muito claros
+   * ou muito escuros. Isso melhora a legibilidade dos números dentro das células.
    *
-   * A escala por quantis distribui as cores conforme os valores reais do dataset,
-   * o que ajuda quando há concentração de observações em uma mesma faixa.
+   * `scaleQuantile` distribui as cores conforme a distribuição real dos dados.
+   * Essa escolha é útil quando os valores não estão uniformemente distribuídos,
+   * pois evita que quase todas as células caiam na mesma faixa de cor.
    */
   const heatmapColors = d3.range(6).map((i) =>
     d3.interpolateGreens(0.14 + i * ((0.88 - 0.14) / 5)),
@@ -122,20 +168,25 @@ export function renderHolidayHeatmap(data) {
     .range(heatmapColors);
 
   /**
-   * Cores de superfície do gráfico.
-   * A mesma cor é usada no fundo visual do heatmap e na caixa explicativa,
-   * mantendo a composição mais uniforme.
+   * Cores de superfície usadas no gráfico e no card explicativo.
    */
   const heatmapSurfaceColor = "#f8fafc";
   const heatmapSurfaceBorder = "rgba(15, 23, 42, 0.08)";
 
-  // Cor neutra para células sem informação, sem sugerir baixo volume.
+  /**
+   * Cor neutra para células sem dados.
+   *
+   * Ela é propositalmente diferente dos verdes da escala para não sugerir que
+   * ausência de dado significa volume baixo.
+   */
   const missingCellColor = "#f1f5f9";
 
   /**
-   * Cores semânticas das marcações especiais.
-   * A pandemia e a retomada usam a mesma cor para manter unidade visual
-   * nas marcações de eventos importantes.
+   * Cores das marcações de eventos importantes.
+   *
+   * A mesma família de cor é usada para impacto e retomada porque ambas são
+   * marcações semânticas sobre a série temporal, e não valores da escala verde.
+   * A diferença entre elas é feita também pelos textos "PANDEMIA" e "RECUPERADO".
    */
   const impactColor = "#92400e";
   const impactColorDark = "#78350f";
@@ -146,8 +197,12 @@ export function renderHolidayHeatmap(data) {
   const recoveryShadow = "rgba(146, 64, 14, 0.42)";
 
   /**
-   * Define automaticamente se o texto dentro da célula deve ser claro ou escuro.
-   * Isso mantém a legibilidade nas diferentes intensidades da paleta verde.
+   * Escolhe automaticamente a cor do texto dentro de cada célula.
+   *
+   * Como a cor de fundo varia de verde claro a verde escuro, usar sempre a
+   * mesma cor para o texto poderia comprometer a legibilidade. Aqui calculamos
+   * a luminância aproximada da cor de fundo e decidimos entre texto escuro ou
+   * branco.
    */
   function readableTextColor(backgroundColor) {
     const color = d3.color(backgroundColor);
@@ -166,31 +221,55 @@ export function renderHolidayHeatmap(data) {
     return luminance > 0.45 ? "#0f172a" : "#ffffff";
   }
 
-  // Linha de base pré-pandemia: média das corridas nos feriados até fev/2020.
-  // A pandemia foi declarada em março/2020, então jan/fev funcionam como referência.
+  /**
+   * Ordena a série por data para permitir cálculos temporais.
+   *
+   * O heatmap em si é uma matriz feriado × ano, mas as marcações de impacto e
+   * retomada dependem da ordem cronológica dos feriados.
+   */
   const sortedSeries = [...data.holidaySeries].sort((a, b) =>
     a.dayISO.localeCompare(b.dayISO),
   );
 
+  /**
+   * Baseline pré-pandemia.
+   *
+   * Usamos a média dos feriados até fevereiro de 2020 como referência inicial,
+   * pois a pandemia passa a afetar fortemente a mobilidade a partir de março.
+   * Essa baseline serve para detectar a primeira queda acentuada.
+   */
   const baseline =
     d3.mean(
       sortedSeries.filter((d) => d.dayISO <= "2020-02-17"),
       (d) => d.trips,
     ) || 10000;
 
-  // Impacto: primeiro feriado com volume abaixo de 60% da baseline.
+  /**
+   * Ponto de impacto.
+   *
+   * É definido como o primeiro feriado cujo volume fica abaixo de 60% da média
+   * pré-pandemia.
+   */
   const impactPoint = sortedSeries.find((d) => d.trips < baseline * 0.6);
 
   /**
-   * Limiar de 75% porque a baseline inclui jan/fev 2020,
-   * que registraram volumes excepcionalmente altos.
-   * Fallback: caso o limiar nunca seja atingido, usa o feriado de maior
-   * volume após o ponto de impacto.
+   * Série posterior ao impacto.
+   *
+   * A retomada só deve ser procurada depois do ponto de impacto. Caso o impacto
+   * não seja encontrado, usamos março de 2020 como referência de fallback.
    */
   const afterImpact = sortedSeries.filter(
     (d) => d.dayISO > (impactPoint?.dayISO ?? "2020-03-01"),
   );
 
+  /**
+   * Ponto de retomada.
+   *
+   * A regra principal marca o primeiro feriado que volta a atingir pelo menos
+   * 75% da baseline. Se nenhum feriado atingir esse limiar, usamos como fallback
+   * o feriado de maior volume após o impacto, para ainda indicar o melhor sinal
+   * de recuperação disponível nos dados.
+   */
   const recoveryPoint =
     afterImpact.find((d) => d.trips >= baseline * 0.75) ??
     afterImpact.reduce(
@@ -198,7 +277,12 @@ export function renderHolidayHeatmap(data) {
       null,
     );
 
-  // Chave composta (feriado_ano) usada para marcar células específicas do grid.
+  /**
+   * Chaves compostas usadas para identificar as células especiais no grid.
+   *
+   * Como cada célula é definida por feriado e ano, a chave `feriado_ano` permite
+   * verificar rapidamente se uma célula deve receber borda e etiqueta especial.
+   */
   const impactKey = impactPoint
     ? `${impactPoint.holidayName}_${impactPoint.year}`
     : null;
@@ -207,14 +291,24 @@ export function renderHolidayHeatmap(data) {
     ? `${recoveryPoint.holidayName}_${recoveryPoint.year}`
     : null;
 
-  // Índice O(1) para buscar os dados de cada célula sem iterar o array inteiro.
+  /**
+   * Índice para acesso rápido aos dados de cada célula.
+   *
+   * Em vez de procurar no array inteiro para cada combinação feriado × ano,
+   * criamos um Map. Isso deixa a montagem da matriz mais simples e eficiente.
+   */
   const dataMap = new Map();
   data.holidaySeries.forEach((item) => {
     dataMap.set(`${item.holidayName}_${item.year}`, item);
   });
 
-  // Monta a matriz completa do grid, incluindo células sem dados.
-  // Isso mantém o layout sempre como 9 linhas × 4 colunas.
+  /**
+   * Matriz completa do heatmap.
+   *
+   * Mesmo que algum feriado/ano não tenha registro, a célula é criada com
+   * `trips: null`. Isso mantém o layout sempre consistente: 9 linhas por
+   * 4 colunas.
+   */
   const gridCells = [];
 
   yDomain.forEach((holiday) => {
@@ -234,8 +328,13 @@ export function renderHolidayHeatmap(data) {
     });
   });
 
-  // O padrão join(div) garante que apenas um tooltip exista no DOM,
-  // evitando duplicação a cada re-renderização do heatmap.
+  /**
+   * Tooltip único compartilhado pela visualização.
+   *
+   * O padrão `selectAll(...).data([null]).join(...)` garante que apenas um
+   * elemento de tooltip exista no DOM, mesmo se a view for renderizada várias
+   * vezes ao trocar de gráfico no seletor.
+   */
   const tooltip = d3
     .select("body")
     .selectAll(".chart-tooltip")
@@ -243,7 +342,12 @@ export function renderHolidayHeatmap(data) {
     .join("div")
     .attr("class", "chart-tooltip");
 
-  // Renderiza as células do grid com preenchimento de cor proporcional ao volume.
+  /**
+   * Células do heatmap.
+   *
+   * Cada retângulo recebe posição a partir das escalas de banda. Células com
+   * dados usam a escala verde; células sem dados usam a cor neutra.
+   */
   const cells = g
     .selectAll("rect.cell")
     .data(gridCells)
@@ -263,10 +367,11 @@ export function renderHolidayHeatmap(data) {
     .attr("stroke-width", 1.5);
 
   /**
-   * Borda sobreposta nas células marcadas como impacto ou retomada.
+   * Células marcadas como impacto ou retomada.
    *
-   * As etiquetas textuais ("PANDEMIA" / "RECUPERADO") evitam que a interpretação
-   * dependa apenas da cor.
+   * A borda é desenhada em um segundo retângulo, por cima da célula original.
+   * Isso evita misturar a cor semântica da borda com a cor de preenchimento,
+   * que continua representando o volume de corridas.
    */
   const markedCells = gridCells.filter((d) => d.isImpact || d.isRecovery);
 
@@ -291,7 +396,12 @@ export function renderHolidayHeatmap(data) {
     )
     .style("pointer-events", "none");
 
-  // Tooltips interativos no hover.
+  /**
+   * Interações de tooltip.
+   *
+   * No hover, reforçamos a borda da célula e mostramos os detalhes do feriado.
+   * Células sem dados não exibem tooltip.
+   */
   cells
     .on("mouseover", function (event, d) {
       if (d.trips === null) return;
@@ -330,9 +440,13 @@ export function renderHolidayHeatmap(data) {
       tooltip.style("opacity", 0);
     });
 
-  // Rótulo numérico centralizado dentro de cada célula.
-  // Nas células anotadas, o número sobe levemente para deixar espaço
-  // para a micro-etiqueta textual abaixo.
+  /**
+   * Valor numérico dentro de cada célula.
+   *
+   * Para valores grandes, usamos abreviação em milhares. Nas células marcadas
+   * como impacto ou retomada, o número sobe um pouco para abrir espaço para a
+   * etiqueta textual abaixo.
+   */
   g.selectAll("text.cell-val")
     .data(gridCells)
     .join("text")
@@ -354,7 +468,11 @@ export function renderHolidayHeatmap(data) {
       return d.trips >= 1000 ? `${(d.trips / 1000).toFixed(1)}k` : d.trips;
     });
 
-  // Micro-etiqueta abaixo do número: "PANDEMIA" ou "RECUPERADO".
+  /**
+   * Etiqueta textual para células especiais.
+   *
+   * O texto ajuda a interpretar as marcações sem depender apenas da cor.
+   */
   g.selectAll("text.cell-tag")
     .data(markedCells)
     .join("text")
@@ -369,7 +487,12 @@ export function renderHolidayHeatmap(data) {
     .style("pointer-events", "none")
     .text((d) => (d.isRecovery ? "RECUPERADO" : "PANDEMIA"));
 
-  // Render Y Axis: nomes dos feriados em português + data/regra em texto menor.
+  /**
+   * Eixo Y customizado.
+   *
+   * O d3.axisLeft cria os grupos dos ticks, mas removemos o texto padrão e
+   * adicionamos manualmente duas linhas: o nome do feriado e sua data/regra.
+   */
   const yAxis = d3.axisLeft(y).tickFormat("");
 
   const yAxisG = g.append("g").call(yAxis).attr("class", "y-axis");
@@ -398,11 +521,19 @@ export function renderHolidayHeatmap(data) {
     .attr("font-weight", 600)
     .text((id) => getHolidayInfo(id).dateRule);
 
-  // Remove marcas do eixo Y e suaviza a linha do domínio.
+  /**
+   * Remove as marcas pequenas do eixo Y e suaviza a linha do domínio.
+   * Como as células já formam o grid visualmente, os ticks laterais seriam ruído.
+   */
   g.selectAll(".tick line").attr("stroke", "none");
   g.selectAll(".domain").attr("stroke", "#cbd5e1");
 
-  // Caption centralizado do eixo Y, rotacionado à esquerda.
+  /**
+   * Rótulo vertical do eixo Y.
+   *
+   * Como a margem esquerda foi aumentada para comportar os nomes dos feriados,
+   * o rótulo também é deslocado mais para a esquerda.
+   */
   g.append("text")
     .attr("transform", "rotate(-90)")
     .attr("x", -height / 2)
@@ -413,7 +544,12 @@ export function renderHolidayHeatmap(data) {
     .attr("font-weight", 600)
     .text("Feriados Oficiais dos Estados Unidos");
 
-  // Render X Axis: anos.
+  /**
+   * Eixo X com os anos.
+   *
+   * Como o domínio é numérico, usamos `d3.format("d")` para garantir que os
+   * anos apareçam como inteiros, sem separador ou casa decimal.
+   */
   const xAxis = d3.axisBottom(x).tickFormat(d3.format("d"));
 
   const xAxisG = g
@@ -431,7 +567,9 @@ export function renderHolidayHeatmap(data) {
   xAxisG.selectAll("line").attr("stroke", "#cbd5e1");
   xAxisG.select(".domain").attr("stroke", "#cbd5e1");
 
-  // Caption centralizado do eixo X.
+  /**
+   * Rótulo do eixo X.
+   */
   g.append("text")
     .attr("x", width / 2)
     .attr("y", height + 54)
@@ -442,8 +580,11 @@ export function renderHolidayHeatmap(data) {
     .text("Anos");
 
   /**
-   * Legenda do heatmap.
-   * Escala discreta de 6 faixas, com rótulos de intervalo personalizados.
+   * Legenda discreta da escala de cor.
+   *
+   * Como a escala tem seis faixas, a legenda também é desenhada em seis blocos.
+   * Cada bloco mostra o intervalo aproximado de corridas correspondente àquela
+   * cor.
    */
   const legendWidth = 360;
   const legendHeight = 14;
@@ -454,6 +595,11 @@ export function renderHolidayHeatmap(data) {
     .append("g")
     .attr("transform", `translate(${legendX},${legendY})`);
 
+  /**
+   * Formatação compacta para os números da legenda.
+   *
+   * Valores acima de mil são mostrados como `k`, mantendo a legenda curta.
+   */
   const formatTripsShort = (value) => {
     if (!Number.isFinite(value)) return "—";
     return value >= 1000
@@ -472,6 +618,10 @@ export function renderHolidayHeatmap(data) {
 
   const legendStepWidth = legendWidth / heatmapColors.length;
 
+  /**
+   * `invertExtent` recupera, para cada cor, o intervalo de valores que cai
+   * naquela faixa da escala quantílica.
+   */
   const legendItems = heatmapColors.map((color) => {
     const [from, to] = colorScale.invertExtent(color);
 
@@ -508,9 +658,11 @@ export function renderHolidayHeatmap(data) {
     .text((d) => `${formatTripsShort(d.from)}–${formatTripsShort(d.to)}`);
 
   /**
-   * Cards explicativos acima do gráfico.
-   * A caixa usa a mesma cor de superfície do heatmap; as cores semânticas
-   * aparecem apenas nos marcadores e nos títulos internos.
+   * Card explicativo fora do SVG.
+   *
+   * Diferente dos eixos e células, este conteúdo é inserido no DOM HTML da
+   * página, no elemento `#explanation`. Isso permite usar HTML flexível para
+   * texto, marcadores e pequenos blocos explicativos.
    */
   const explanationEl = document.querySelector("#explanation");
 

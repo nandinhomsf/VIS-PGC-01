@@ -1,10 +1,13 @@
 /**
  * Feriados oficiais dos EUA cobertos pela análise (2019–2022).
  *
- * A janela começa em julho de 2019 porque os arquivos Parquet disponíveis
- * só cobrem a partir de 2019-07. Os anos de 2020 a 2022 estão completos.
+ * A janela começa em julho de 2019 (arquivo 2019-07) para equilibrar tempo
+ * de espera de render. Os anos de 2020 a 2022 estão completos.
  * As datas estão no formato ISO 8601 (AAAA-MM-DD) para uso direto nas
  * cláusulas SQL `DATE '...'` do DuckDB.
+ * 
+ * Harded-coded porque a lista de feriados é relativamente pequena e fixa;
+ * Ponto de melhoria futura: extrair dinamicamente dos dados ou de uma API de feriados.
  */
 export const HOLIDAYS = [
   "2019-07-04",
@@ -46,6 +49,9 @@ export const HOLIDAYS = [
  * O formato "DD Mon AAAA (Nome)" é usado nos eixos e tooltips dos gráficos.
  * O nome entre parênteses é extraído em `utils/date.js` para identificar
  * o tipo do feriado (ex.: "Memorial Day", "Thanksgiving") de forma genérica.
+ * 
+ * Harded-coded porque a lista de feriados é relativamente pequena e fixa;
+ * Ponto de melhoria futura: extrair dinamicamente dos dados ou de uma API de feriados.
  */
 export const HOLIDAY_LABELS = {
   "2019-07-04": "04 Jul 2019 (Independence Day)",

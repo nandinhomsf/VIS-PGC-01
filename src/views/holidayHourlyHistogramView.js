@@ -2,12 +2,16 @@ import * as d3 from "d3";
 import { createBaseChart } from "../utils/chart";
 
 /**
- * Mapeamento de nomes canônicos dos feriados para rótulos em português.
- * A ordem define a distribuição dos pequenos múltiplos no grid.
+ * Mapeamento dos feriados usados na análise.
  *
- * `dateRule` aparece no cabeçalho de cada subgráfico. Para feriados fixos,
- * usa-se a data do calendário; para feriados móveis, usa-se a regra
- * baseada em dia da semana e mês.
+ * O `id` precisa bater com o nome canônico gerado na camada de dados.
+ * O `label` é o nome exibido no painel.
+ * O `dateRule` aparece no cabeçalho de cada subgráfico, ajudando o leitor
+ * a entender quando aquele feriado ocorre.
+ *
+ * A ordem deste array também define a ordem dos painéis no grid.
+ * 
+ * Ponto de melhoria futura: extrair dinamicamente dos dados ou de uma API de feriados.
  */
 const HOLIDAY_MAP = [
   { id: "New Year", label: "Ano Novo", dateRule: "01/janeiro" },
@@ -53,42 +57,69 @@ const HOLIDAY_MAP = [
   },
 ];
 
+/**
+ * Anos comparados nas visualizações.
+ *
+ * A ordem é fixa para manter consistência
+ * 
+ * Ponto de melhoria futura: extrair dinamicamente dos dados.
+ */
 const YEAR_DOMAIN = [2019, 2020, 2021, 2022];
 
 /**
- * Cores por ano.
- * 2020 recebe a cor de destaque usada nas demais views para indicar
- * o período de impacto inicial da pandemia.
+ * Palheta por ano.
+ *
+ * A cor âmbar/marrom destaca 2020, ano de impacto inicial da pandemia.
+ * Os demais anos usam o mesmo verde
+ *
  */
 const YEAR_STYLES = {
-  2019: { color: "#64748b", label: "2019" },
+  2019: { color: "#238b45", label: "2019" },
   2020: { color: "#92400e", label: "2020" },
-  2021: { color: "#2563eb", label: "2021" },
-  2022: { color: "#16a34a", label: "2022" },
+  2021: { color: "#238b45", label: "2021" },
+  2022: { color: "#238b45", label: "2022" },
 };
 
 /**
- * Histograma por hora.
+ * Renderiza a visualização de histogramas horários.
  *
  * Cada painel representa um feriado.
- * Cada linha representa um ano.
- * Cada barra indica o número de corridas naquela hora do dia.
+ * Dentro de cada painel, cada linha representa um ano.
+ * Cada barra representa o volume de corridas em uma hora do dia.
  *
- * A estrutura em pequenos múltiplos mantém o foco nos feriados e
- * permite comparar mudanças no perfil horário antes, durante e após
- * o impacto inicial da pandemia.
+ * A ideia é responder se a pandemia alterou não apenas o número de corridas,
+ * mas principalmente o momento do dia em que as corridas aconteceram.
  */
 export function renderHolidayHourlyHistogramView(data) {
   const { svg } = createBaseChart();
 
+  /**
+   * Este gráfico usa altura um pouco maior que o padrão porque ele contém
+   * 9 pequenos múltiplos, e cada painel ainda precisa acomodar 4 histogramas
+   * pequenos, um para cada ano.
+   */
   const margin = { top: 82, right: 48, bottom: 64, left: 70 };
   const width = 1120 - margin.left - margin.right;
   const height = 720 - margin.top - margin.bottom;
 
+  /**
+   * Grupo principal deslocado pelas margens.
+   *
+   * A partir daqui, os elementos do gráfico são desenhados em coordenadas locais,
+   * começando em (0, 0), enquanto as margens ficam reservadas para legenda,
+   * respiro visual e eventuais rótulos.
+   */
   const root = svg
     .append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
+  /**
+   * Filtra os registros horários válidos.
+   *
+   * A hora precisa estar entre 0 e 23, e `trips` precisa ser numérico.
+   * Esse filtro evita que valores ausentes ou inconsistentes entrem na montagem
+   * dos histogramas.
+   */
   const rawRows = (data.holidayHourlyByYear || []).filter(
     (d) =>
       Number.isFinite(d.pickup_hour) &&
@@ -99,8 +130,10 @@ export function renderHolidayHourlyHistogramView(data) {
 
   /**
    * Índice por feriado, ano e hora.
-   * Facilita reconstruir um histograma completo de 24 horas mesmo quando
-   * determinada hora não aparece explicitamente nos dados.
+   *
+   * Em vez de procurar no array inteiro a cada célula do histograma, criamos
+   * um Map com chave composta. Isso facilita montar a estrutura completa
+   * 9 feriados × 4 anos × 24 horas.
    */
   const dataMap = new Map();
 
@@ -109,10 +142,15 @@ export function renderHolidayHourlyHistogramView(data) {
   });
 
   /**
-   * Monta uma série completa para cada feriado:
-   * - 9 feriados;
-   * - 4 anos por feriado;
-   * - 24 horas por ano.
+   * Monta os dados no formato exigido pela visualização.
+   *
+   * Cada painel contém:
+   * - dados do feriado;
+   * - uma lista de anos;
+   * - para cada ano, 24 bins horários.
+   *
+   * Mesmo que determinada hora não tenha corridas, criamos o bin com `trips = 0`.
+   * Isso mantém todos os histogramas com a mesma estrutura e evita buracos no eixo.
    */
   const holidayPanels = HOLIDAY_MAP.map((holiday) => {
     const years = YEAR_DOMAIN.map((year) => {
@@ -130,6 +168,12 @@ export function renderHolidayHourlyHistogramView(data) {
         };
       });
 
+      /**
+       * Total e pico do ano dentro daquele feriado.
+       *
+       * O total é usado no tooltip e no resumo.
+       * O pico ajuda a calcular a escala vertical das barras dentro do painel.
+       */
       const total = d3.sum(bins, (d) => d.trips);
       const peak = d3.max(bins, (d) => d.trips) || 0;
 
@@ -144,39 +188,101 @@ export function renderHolidayHourlyHistogramView(data) {
     return {
       ...holiday,
       years,
+
+      /**
+       * Maior valor horário do painel inteiro.
+       *
+       * Usar um máximo por painel, e não por linha/ano, permite comparar os
+       * quatro anos dentro do mesmo feriado. Se cada ano tivesse sua própria
+       * escala vertical, todas as linhas pareceriam igualmente altas, escondendo
+       * diferenças de volume.
+       */
       panelMaxTrips: d3.max(years, (d) => d.peak) || 1,
     };
   });
 
   /**
-   * Layout em pequenos múltiplos: 3 colunas × 3 linhas.
-   * Isso mantém um painel por feriado.
+   * Layout em pequenos múltiplos.
+   *
+   * O gráfico é organizado em 3 colunas × 3 linhas, um painel por feriado.
+   * Isso evita misturar todos os feriados em um único gráfico e facilita comparar
+   * padrões horários dentro de cada feriado.
    */
   const cols = 3;
   const rows = 3;
   const panelWidth = width / cols;
   const panelHeight = height / rows;
 
+  /**
+   * Margens internas de cada painel.
+   *
+   * A margem esquerda interna foi aumentada para acomodar os rótulos dos anos
+   * dentro de cada subgráfico, sem que eles escapem para fora dos cards.
+   */
   const innerMargin = { top: 50, right: 18, bottom: 32, left: 54 };
   const innerWidth = panelWidth - innerMargin.left - innerMargin.right;
   const innerHeight = panelHeight - innerMargin.top - innerMargin.bottom;
 
-  const x = d3.scaleBand().domain(d3.range(24)).range([0, innerWidth]).padding(0.1);
+  /**
+   * Escala categórica das 24 horas.
+   *
+   * `scaleBand` é usada porque cada hora ocupa uma barra discreta no histograma.
+   * O padding cria um pequeno espaço entre barras adjacentes.
+   */
+  const x = d3
+    .scaleBand()
+    .domain(d3.range(24))
+    .range([0, innerWidth])
+    .padding(0.1);
 
+  /**
+   * Escala auxiliar contínua para o eixo X.
+   *
+   * As barras usam `scaleBand`, mas o eixo com marcações em 0h, 6h, 12h, 18h
+   * e 23h fica mais simples com uma escala linear. O range é alinhado ao centro
+   * da primeira e da última barra para que os ticks coincidam visualmente com
+   * as horas.
+   */
   const xLine = d3
     .scaleLinear()
     .domain([0, 23])
     .range([x(0) + x.bandwidth() / 2, x(23) + x.bandwidth() / 2]);
 
+  /**
+   * Escala vertical das linhas de ano dentro de cada painel.
+   *
+   * Cada ano recebe uma faixa vertical. Dentro dessa faixa, desenhamos uma linha
+   * de base e o histograma correspondente.
+   */
   const yRow = d3
     .scaleBand()
     .domain(YEAR_DOMAIN)
     .range([0, innerHeight])
     .padding(0.28);
 
+  /**
+   * Altura útil de cada mini-histograma.
+   *
+   * A barra não ocupa a faixa inteira do ano para deixar espaço para a linha
+   * de base e para evitar colisão entre anos próximos.
+   */
   const rowChartHeight = yRow.bandwidth() * 0.72;
+
+  /**
+   * Posição da linha de base dentro de cada faixa anual.
+   *
+   * As barras crescem para cima a partir dessa linha, como em um histograma
+   * convencional.
+   */
   const rowBaseline = yRow.bandwidth() * 0.84;
 
+  /**
+   * Cores de fundo, texto e grade.
+   *
+   * Os fundos claros e bordas suaves seguem a linguagem visual das demais views.
+   * A grade é propositalmente discreta: ela ajuda na leitura das horas, mas não
+   * deve competir com as barras coloridas.
+   */
   const surfaceColor = "#f8fafc";
   const panelBorder = "rgba(15, 23, 42, 0.08)";
   const textPrimary = "#0f172a";
@@ -184,6 +290,12 @@ export function renderHolidayHourlyHistogramView(data) {
   const gridColor = "#e2e8f0";
   const rowLineColor = "#cbd5e1";
 
+  /**
+   * Tooltip único da visualização.
+   *
+   * O padrão com `data([null]).join("div")` garante que exista apenas um tooltip
+   * no DOM, mesmo que a view seja renderizada várias vezes ao trocar de gráfico.
+   */
   const tooltip = d3
     .select("body")
     .selectAll(".chart-tooltip")
@@ -191,6 +303,12 @@ export function renderHolidayHourlyHistogramView(data) {
     .join("div")
     .attr("class", "chart-tooltip");
 
+  /**
+   * Criação dos painéis.
+   *
+   * Cada grupo `g.hourly-panel` é deslocado para sua posição no grid.
+   * O cálculo usa o índice do painel para descobrir coluna e linha.
+   */
   const panels = root
     .selectAll("g.hourly-panel")
     .data(holidayPanels)
@@ -202,7 +320,11 @@ export function renderHolidayHourlyHistogramView(data) {
       return `translate(${col * panelWidth},${row * panelHeight})`;
     });
 
-  // Fundo de cada painel.
+  /**
+   * Fundo de cada painel.
+   *
+   * O retângulo cria a aparência de card, separando visualmente os feriados.
+   */
   panels
     .append("rect")
     .attr("x", 8)
@@ -213,7 +335,9 @@ export function renderHolidayHourlyHistogramView(data) {
     .attr("fill", surfaceColor)
     .attr("stroke", panelBorder);
 
-  // Título do feriado em cada painel.
+  /**
+   * Título do feriado no painel.
+   */
   panels
     .append("text")
     .attr("x", 18)
@@ -223,7 +347,12 @@ export function renderHolidayHourlyHistogramView(data) {
     .attr("font-weight", 800)
     .text((d) => d.label);
 
-  // Data fixa ou regra do feriado no cabeçalho de cada painel.
+  /**
+   * Regra/data do feriado.
+   *
+   * Esta segunda linha ajuda a interpretar feriados móveis, como Memorial Day
+   * ou Thanksgiving, sem ocupar espaço no eixo.
+   */
   panels
     .append("text")
     .attr("x", 18)
@@ -233,11 +362,22 @@ export function renderHolidayHourlyHistogramView(data) {
     .attr("font-weight", 600)
     .text((d) => d.dateRule);
 
+  /**
+   * Grupo interno de desenho de cada painel.
+   *
+   * O deslocamento interno reserva espaço para título, data/regra e rótulos
+   * dos anos.
+   */
   const plot = panels
     .append("g")
     .attr("transform", `translate(${innerMargin.left},${innerMargin.top})`);
 
-  // Grade vertical para leitura das horas.
+  /**
+   * Grade vertical de referência para as horas.
+   *
+   * Marcamos 0h, 6h, 12h, 18h e 23h. Essas marcas são suficientes para orientar
+   * a leitura sem transformar cada painel pequeno em um eixo carregado demais.
+   */
   plot
     .append("g")
     .selectAll("line.hour-grid")
@@ -251,6 +391,11 @@ export function renderHolidayHourlyHistogramView(data) {
     .attr("stroke", gridColor)
     .attr("stroke-dasharray", "3,3");
 
+  /**
+   * Grupos de ano dentro de cada painel.
+   *
+   * Cada grupo representa uma linha horizontal: 2019, 2020, 2021 ou 2022.
+   */
   const yearGroups = plot
     .selectAll("g.year-row")
     .data((d) => d.years)
@@ -258,7 +403,12 @@ export function renderHolidayHourlyHistogramView(data) {
     .attr("class", "year-row")
     .attr("transform", (d) => `translate(0,${yRow(d.year)})`);
 
-  // Linha de base em cada faixa anual.
+  /**
+   * Linha de base do histograma.
+   *
+   * Ela indica de onde as barras começam a crescer. Isso ajuda a separar
+   * visualmente as linhas de cada ano.
+   */
   yearGroups
     .append("line")
     .attr("x1", 0)
@@ -268,7 +418,12 @@ export function renderHolidayHourlyHistogramView(data) {
     .attr("stroke", rowLineColor)
     .attr("stroke-width", 1);
 
-  // Rótulo do ano em cada faixa.
+  /**
+   * Rótulo do ano.
+   *
+   * A cor do rótulo é a mesma usada nas barras daquele ano, reforçando a ligação
+   * entre a legenda, o rótulo e o histograma.
+   */
   yearGroups
     .append("text")
     .attr("x", -10)
@@ -279,9 +434,23 @@ export function renderHolidayHourlyHistogramView(data) {
     .attr("font-weight", 700)
     .text((d) => d.year);
 
-  // Barras do histograma por hora.
+  /**
+   * Barras dos histogramas por hora.
+   *
+   * Aqui usamos `each` porque a escala vertical das barras depende do painel
+   * inteiro. Dentro de um mesmo feriado, os quatro anos compartilham o mesmo
+   * máximo (`panelMaxTrips`), permitindo comparação direta entre anos naquele
+   * feriado.
+   */
   yearGroups.each(function (yearData) {
     const panelData = d3.select(this.parentNode).datum();
+
+    /**
+     * Escala vertical local do painel.
+     *
+     * O domínio vai de 0 ao maior pico horário daquele feriado. O range vai de
+     * 0 até a altura disponível para as barras dentro de cada linha anual.
+     */
     const h = d3
       .scaleLinear()
       .domain([0, panelData.panelMaxTrips])
@@ -307,9 +476,15 @@ export function renderHolidayHourlyHistogramView(data) {
       .attr("fill", YEAR_STYLES[yearData.year]?.color ?? "#64748b")
       .attr("opacity", 0.88)
       .on("mouseover", function (event, d) {
+        /**
+         * No hover, aumentamos a opacidade para destacar a barra sob o cursor.
+         */
         d3.select(this).attr("opacity", 1);
 
-        const nextHour = d.hour === 23 ? "24:00" : `${String(d.hour + 1).padStart(2, "0")}:00`;
+        const nextHour =
+          d.hour === 23
+            ? "24:00"
+            : `${String(d.hour + 1).padStart(2, "0")}:00`;
 
         tooltip.style("opacity", 1).html(`
           <div class="tooltip-title">${d.dayLabel ?? d.holidayLabel}</div>
@@ -327,11 +502,16 @@ export function renderHolidayHourlyHistogramView(data) {
           </div>
           <div class="tooltip-row">
             <span class="tooltip-label">Hora:</span>
-            <span class="tooltip-val">${String(d.hour).padStart(2, "0")}:00–${nextHour}</span>
+            <span class="tooltip-val">${String(d.hour).padStart(
+              2,
+              "0",
+            )}:00–${nextHour}</span>
           </div>
           <div class="tooltip-row tooltip-divider">
             <span class="tooltip-label">Corridas:</span>
-            <span class="tooltip-val highlight">${d.trips.toLocaleString("pt-BR")}</span>
+            <span class="tooltip-val highlight">${d.trips.toLocaleString(
+              "pt-BR",
+            )}</span>
           </div>
           <div class="tooltip-row">
             <span class="tooltip-label">Participação no dia:</span>
@@ -342,6 +522,10 @@ export function renderHolidayHourlyHistogramView(data) {
         `);
       })
       .on("mousemove", function (event) {
+        /**
+         * O tooltip segue o cursor, com um pequeno deslocamento para não ficar
+         * exatamente embaixo do mouse.
+         */
         tooltip
           .style("left", event.pageX + 16 + "px")
           .style("top", event.pageY - 28 + "px");
@@ -352,7 +536,12 @@ export function renderHolidayHourlyHistogramView(data) {
       });
   });
 
-  // Eixo X compacto em cada painel.
+  /**
+   * Eixo X compacto de cada painel.
+   *
+   * Como cada painel é pequeno, exibimos apenas alguns horários de referência.
+   * Isso mantém a leitura geral sem poluir o gráfico com 24 rótulos.
+   */
   const xAxis = d3
     .axisBottom(xLine)
     .tickValues([0, 6, 12, 18, 23])
@@ -374,9 +563,13 @@ export function renderHolidayHourlyHistogramView(data) {
 
   /**
    * Legenda superior.
-   * As cores identificam os anos comparados.
+   *
+   * As cores da legenda são as mesmas usadas nos rótulos e nas barras.
+   * Isso reforça a associação visual entre ano e cor.
    */
-  const legend = svg.append("g").attr("transform", `translate(${margin.left},28)`);
+  const legend = svg
+    .append("g")
+    .attr("transform", `translate(${margin.left},28)`);
 
   const legendItems = legend
     .selectAll("g.legend-year")
@@ -405,8 +598,10 @@ export function renderHolidayHourlyHistogramView(data) {
 
   /**
    * Resumo textual acima do gráfico.
-   * Para cada ano, resume o horário agregado com maior volume de corridas
-   * considerando todos os feriados disponíveis.
+   *
+   * Para cada ano, agregamos todos os feriados e calculamos qual hora teve mais
+   * corridas no conjunto. Esse resumo ajuda o usuário a ter uma leitura global
+   * antes de investigar os painéis individuais.
    */
   const explanationEl = document.querySelector("#explanation");
 
@@ -415,13 +610,23 @@ export function renderHolidayHourlyHistogramView(data) {
       const rows = rawRows.filter((d) => d.year === year);
       const total = d3.sum(rows, (d) => d.trips);
 
+      /**
+       * Agrupa as corridas por hora, somando todos os feriados daquele ano.
+       */
       const tripsByHour = d3.rollup(
         rows,
         (v) => d3.sum(v, (d) => d.trips),
         (d) => d.pickup_hour,
       );
 
-      const peakHour = d3.greatest(d3.range(24), (hour) => tripsByHour.get(hour) || 0);
+      /**
+       * Encontra a hora com maior volume agregado naquele ano.
+       */
+      const peakHour = d3.greatest(
+        d3.range(24),
+        (hour) => tripsByHour.get(hour) || 0,
+      );
+
       const peakTrips = tripsByHour.get(peakHour) || 0;
 
       return {
@@ -454,7 +659,9 @@ export function renderHolidayHourlyHistogramView(data) {
             return `
               <span>
                 <strong style="color: ${yearColor};">${d.year}:</strong>
-                pico em ${hourLabel} · ${d.total.toLocaleString("pt-BR")} corridas
+                pico em ${hourLabel} · ${d.total.toLocaleString(
+                  "pt-BR",
+                )} corridas
               </span>
             `;
           })
